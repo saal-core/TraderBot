@@ -1,76 +1,84 @@
-"""Application settings using Pydantic for environment variable management."""
 import os
-from functools import lru_cache
-from typing import Optional
-from pydantic_settings import BaseSettings
+from typing import Optional, Dict, Any
+from vanna.ollama import Ollama
+from vanna.chromadb import ChromaDB_VectorStore
+import os
+from typing import Dict, Any
 
+from dotenv import load_dotenv
+load_dotenv()
 
-class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
+# ============================================================================
+# Helper Functions
+# ============================================================================
 
-    # Database Configuration
-    db_host: str
-    db_name: str
-    db_user: str
-    db_password: str
-    db_port: int = 5432
-
-    # Ollama Configuration
-    ollama_model: str = "gpt-oss:20b"
-    ollama_api_url: str = "http://localhost:11434"
-
-    # Perplexity API
-    perplexity_api_key: str
-    perplexity_api_url: str = "https://api.perplexity.ai/chat/completions"
-
-    # OpenAI (Optional)
-    openai_api_key: Optional[str] = None
-
-    # Vanna Configuration
-    vanna_persist_dir: str = "./vanna_chromadb_store"
-
-    # Application Settings
-    max_ui_messages_to_display: int = 20
-    log_level: str = "INFO"
-    cuda_visible_devices: str = "0"
-
-    class Config:
-        """Pydantic configuration."""
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-
-
-@lru_cache()
-def get_settings() -> Settings:
+def get_postgres_config() -> Dict[str, Any]:
     """
-    Get cached settings instance.
+    Get PostgreSQL configuration as a dictionary
 
     Returns:
-        Settings: Singleton settings instance
+        Dictionary containing database configuration
     """
-    return Settings()
+    return {
+        "host": os.getenv("DB_HOST"),
+        "port": os.getenv("DB_PORT"),
+        "database": os.getenv("DB_NAME"),
+        "user": os.getenv("DB_USER"),
+        "password": os.getenv("DB_PASSWORD"),
+        "options": f"-c search_path={os.getenv('DB_SCHEMA', 'ai_trading')}",
+    }
 
 
-def validate_settings() -> None:
+def get_ollama_config() -> Dict[str, Any]:
     """
-    Validate that all required settings are present.
+    Get Ollama configuration as a dictionary
 
-    Raises:
-        ValueError: If required settings are missing
+    Returns:
+        Dictionary containing Ollama configuration
     """
-    try:
-        settings = get_settings()
+    return {
+        "model_name": os.getenv("OLLAMA_MODEL"),
+        "base_url": os.getenv("OLLAMA_API_URL"),
+        "temperature_routing": os.getenv("OLLAMA_TEMPERATURE_ROUTING", 0.1),
+        "temperature_sql": os.getenv("OLLAMA_TEMPERATURE_SQL", 0.2),
+        "temperature_greeting": os.getenv("OLLAMA_TEMPERATURE_GREETING", 0.3),
+        "temperature_comparison": os.getenv("OLLAMA_TEMPERATURE_COMPARISON", 0.3),
+    }
 
-        # Check required database fields
-        required_fields = ['db_host', 'db_name', 'db_user', 'db_password']
-        missing = [f for f in required_fields if not getattr(settings, f, None)]
 
-        if missing:
-            raise ValueError(f"Missing required database configuration: {', '.join(missing)}")
+def get_app_config() -> Dict[str, Any]:
+    """
+    Get application configuration as a dictionary
 
-        # Check API keys
-        if not settings.perplexity_api_key:
-            raise ValueError("Missing PERPLEXITY_API_KEY")
+    Returns:
+        Dictionary containing app configuration
+    """
+    return {
+        "title": os.getenv("APP_TITLE",),
+        "icon": os.getenv("APP_ICON",),
+        "max_history_display": os.getenv("MAX_HISTORY_DISPLAY", 10),
+        "chat_context_size": os.getenv("CHAT_CONTEXT_SIZE", 5),
+        "max_result_rows": os.getenv("MAX_RESULT_ROWS", 100),
+        "query_timeout": os.getenv("QUERY_TIMEOUT", 30),
+        "allow_only_select": os.getenv("ALLOW_ONLY_SELECT", True),
+        "sql_injection_protection": os.getenv("SQL_INJECTION_PROTECTION", True),
+    }
 
-    except Exception as e:
-        raise ValueError(f"Settings validation failed: {e}")
+
+def get_vanna_config() -> Dict[str, Any]:
+    return {
+        "model": os.getenv("OLLAMA_MODEL"),
+        "ollama_api_url": os.getenv("OLLAMA_API_URL"),
+        "persist_directory": os.getenv("CHROMADB_PERSIST_DIRECTORY", "chroma_db"),
+    }
+
+class MyVanna(ChromaDB_VectorStore, Ollama):
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        if config is None:
+            config = get_vanna_config()
+        ChromaDB_VectorStore.__init__(self, config=config)
+        Ollama.__init__(self, config=config)
+
+def get_vanna() -> MyVanna:
+    return MyVanna()
+

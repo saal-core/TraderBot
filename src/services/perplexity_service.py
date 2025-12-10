@@ -3,7 +3,6 @@ import logging
 import traceback
 from typing import List, Dict
 import requests
-from config.settings import get_settings
 from config.prompts import PERPLEXITY_SYSTEM_PROMPT
 from helpers import clean_text
 
