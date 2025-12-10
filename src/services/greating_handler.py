@@ -62,14 +62,15 @@ If asked what you can do, mention that you can help query databases and answer q
         if chat_history is None:
             chat_history = []
 
-        history_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in chat_history[-os.getenv("CHAT_HISTORY_CONTEXT_SIZE", 5):]])
-
         try:
+            context_size = int(os.getenv("CHAT_HISTORY_CONTEXT_SIZE", 5))
+            history_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in chat_history[-context_size:]])
             response = self.greeting_chain.invoke({
                 "query": query,
                 "chat_history": history_text
             })
             return response.strip()
+
         except Exception as e:
             print(f"Error generating greeting response: {e}")
             return "Hello! I'm here to help you query databases. How can I assist you?"

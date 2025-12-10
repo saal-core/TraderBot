@@ -208,7 +208,7 @@ def process_greeting(user_query: str) -> Dict:
             ]
 
             greeting_response = st.session_state.greeting_handler.respond(user_query, chat_history)
-            response["content"] = f"👋 {greeting_response}"
+            response["content"] = f"{greeting_response}"
 
     except Exception as e:
         response["content"] = f"❌ Error: {str(e)}"
