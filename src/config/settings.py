@@ -72,13 +72,19 @@ def get_vanna_config() -> Dict[str, Any]:
         "persist_directory": os.getenv("CHROMADB_PERSIST_DIRECTORY", "chroma_db"),
     }
 
-class MyVanna(ChromaDB_VectorStore, Ollama):
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
-        if config is None:
-            config = get_vanna_config()
-        ChromaDB_VectorStore.__init__(self, config=config)
-        Ollama.__init__(self, config=config)
+class Settings:
+    def __init__(self):
+        self.ollama_model = os.getenv("OLLAMA_MODEL")
+        self.ollama_api_url = os.getenv("OLLAMA_API_URL")
+        self.vanna_persist_dir = os.getenv("CHROMADB_PERSIST_DIRECTORY", "chroma_db")
+        self.db_host = os.getenv("DB_HOST")
+        self.db_name = os.getenv("DB_NAME")
+        self.db_user = os.getenv("DB_USER")
+        self.db_password = os.getenv("DB_PASSWORD")
+        self.db_port = os.getenv("DB_PORT")
+        self.temperature_routing = float(os.getenv("OLLAMA_TEMPERATURE_ROUTING", 0.1))
+        self.temperature_sql = float(os.getenv("OLLAMA_TEMPERATURE_SQL", 0.2))
 
-def get_vanna() -> MyVanna:
-    return MyVanna()
+def get_settings() -> Settings:
+    return Settings()
 

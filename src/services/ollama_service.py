@@ -3,7 +3,7 @@ import logging
 import traceback
 from typing import List, Dict
 import ollama
-from config.settings import get_settings
+from src.config.settings import get_settings
 
 settings = get_settings()
 

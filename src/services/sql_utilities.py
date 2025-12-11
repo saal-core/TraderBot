@@ -158,22 +158,28 @@ class PostgreSQLExecutor:
         if not is_valid:
             return False, None, error_msg
 
+        conn = None
+        try:
+            conn = self.get_connection()
+            if not conn:
+                return False, None, "Failed to get database connection"
 
-        conn = self.get_connection()
-        if not conn:
-            return False, None, "Failed to get database connection"
+            # Execute query with pandas
+            df = pd.read_sql_query(query, conn, params=params)
 
-        # Execute query with pandas
-        df = pd.read_sql_query(query, conn, params=params)
+            # Check for max rows limit
+            if len(df) > 1000:
+                return True, df.head(), f"Query returned {len(df)} rows"
 
-        # Check for max rows limit
-        if len(df) > 1000:
-            return True, df.head(), f"Query returned {len(df)} rows"
+            if df.empty:
+                return True, df, "Query executed successfully but returned no results"
 
-        if df.empty:
-            return True, df, "Query executed successfully but returned no results"
-
-        return True, df, f"Query executed successfully. Returned {len(df)} rows"
+            return True, df, f"Query executed successfully. Returned {len(df)} rows"
+        
+        finally:
+            # Always return connection to the pool
+            if conn:
+                self.return_connection(conn)
 
 
     def get_schema_info(self, schema: str = None) -> str:

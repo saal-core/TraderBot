@@ -1,15 +1,56 @@
 """Vanna AI service for text-to-SQL portfolio queries."""
 import logging
+import shutil
 from typing import Optional, Dict, Any
 import pandas as pd
 from vanna.ollama import Ollama
 from vanna.chromadb import ChromaDB_VectorStore
-from config.settings import get_settings
-from config.prompts import VANNA_EXPLANATION_PROMPT
-from services.ollama_service import OllamaService
+
+try:
+    from vanna.anthropic import Anthropic
+except (ImportError, ModuleNotFoundError):
+    # Fallback if vanna.anthropic is not available or anthropic is not installed
+    try:
+        import anthropic
+        class Anthropic:
+            def __init__(self, config=None):
+                if config is None:
+                    config = {}
+                self.api_key = config.get("api_key")
+                self.model = config.get("model", "claude-3-opus-20240229")
+                self.client = anthropic.Anthropic(api_key=self.api_key)
+
+            def system_message(self, message: str) -> any:
+                return {"role": "system", "content": message}
+
+            def user_message(self, message: str) -> any:
+                return {"role": "user", "content": message}
+
+            def assistant_message(self, message: str) -> any:
+                return {"role": "assistant", "content": message}
+
+            def submit_prompt(self, prompt, **kwargs) -> str:
+                response = self.client.messages.create(
+                    model=self.model,
+                    max_tokens=1024,
+                    messages=[
+                        {"role": "user", "content": prompt}
+                    ]
+                )
+                return response.content[0].text
+    except ModuleNotFoundError:
+        # If anthropic package is not installed, create a stub
+        class Anthropic:
+            def __init__(self, config=None):
+                raise ImportError("anthropic package is not installed. Install it with: pip install anthropic")
+
+from src.config.settings import get_settings
+from src.config.prompts import VANNA_EXPLANATION_PROMPT
+from src.services.ollama_service import OllamaService
+import os
+
 
 settings = get_settings()
-
 
 class MyVanna(ChromaDB_VectorStore, Ollama):
     """Custom Vanna class combining ChromaDB vector store with Ollama LLM."""
@@ -27,18 +68,99 @@ class MyVanna(ChromaDB_VectorStore, Ollama):
                 "ollama_api_url": settings.ollama_api_url,
                 "persist_directory": settings.vanna_persist_dir,
             }
-        ChromaDB_VectorStore.__init__(self, config=config)
+        
+        persist_dir = config.get("persist_directory", settings.vanna_persist_dir)
+        
+        try:
+            ChromaDB_VectorStore.__init__(self, config=config)
+        except (KeyError, Exception) as e:
+            logging.warning(f"ChromaDB initialization failed ({type(e).__name__}: {e}), clearing and reinitializing...")
+            # Remove corrupted database
+            if os.path.exists(persist_dir):
+                shutil.rmtree(persist_dir)
+                logging.info(f"Cleared corrupted ChromaDB at {persist_dir}")
+            # Retry initialization
+            try:
+                ChromaDB_VectorStore.__init__(self, config=config)
+            except Exception as retry_error:
+                logging.error(f"ChromaDB reinitialization failed: {retry_error}")
+                raise
+        
         Ollama.__init__(self, config=config)
+
+
+class MyVannaClaude(ChromaDB_VectorStore, Anthropic):
+    """Custom Vanna class combining ChromaDB vector store with Anthropic LLM."""
+
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        """
+        Initialize Vanna with ChromaDB and Anthropic.
+        """
+        if config is None:
+            config = {
+                "api_key": os.getenv("ANTHROPIC_API_KEY"),
+                "model": "claude-sonnet-4-5-20250929", # Default to Sonnet 4.5
+                "persist_directory": settings.vanna_persist_dir,
+            }
+        ChromaDB_VectorStore.__init__(self, config=config)
+        Anthropic.__init__(self, config=config)
+    
+    # These abstract methods are inherited from Anthropic but may not be needed for Vanna
+    def system_message(self, message: str):
+        """Create a system message (inherited from Anthropic)."""
+        return {"role": "system", "content": message}
+
+    def user_message(self, message: str):
+        """Create a user message (inherited from Anthropic)."""
+        return {"role": "user", "content": message}
+
+    def assistant_message(self, message: str):
+        """Create an assistant message (inherited from Anthropic)."""
+        return {"role": "assistant", "content": message}
+
+    def submit_prompt(self, prompt, **kwargs) -> str:
+        """Submit a prompt to Claude (inherited from Anthropic)."""
+        if isinstance(prompt, str):
+            messages = [{"role": "user", "content": prompt}]
+        else:
+            messages = prompt
+        
+        response = self.client.messages.create(
+            model=self.model,
+            max_tokens=1024,
+            messages=messages
+        )
+        return response.content[0].text
+
 
 
 class VannaService:
     """Service for portfolio queries using Vanna AI text-to-SQL."""
 
-    def __init__(self):
+    def __init__(self, llm_type: str = "gpt-oss"):
         """Initialize Vanna service."""
-        self.vn = MyVanna()
+        self.llm_type = llm_type
+        self.vn_ollama = MyVanna()
+        self.vn_claude = None # Lazy init
+        
+        self.vn = self.vn_ollama # Default
+        if llm_type == "claude":
+             self.vn_claude = MyVannaClaude()
+             self.vn = self.vn_claude
+
         self.ollama = OllamaService()
         self.connected = False
+
+    def set_llm(self, llm_type: str):
+        """Switch LLM backend."""
+        self.llm_type = llm_type
+        if llm_type == "claude":
+            if self.vn_claude is None:
+                self.vn_claude = MyVannaClaude()
+            self.vn = self.vn_claude
+        else:
+            self.vn = self.vn_ollama
+
 
     def connect(self) -> bool:
         """
@@ -48,15 +170,26 @@ class VannaService:
             bool: True if connection successful
         """
         try:
-            self.vn.connect_to_postgres(
+            # Connect both instances if they exist
+            self.vn_ollama.connect_to_postgres(
                 host=settings.db_host,
                 dbname=settings.db_name,
                 user=settings.db_user,
                 password=settings.db_password,
                 port=settings.db_port
             )
+            
+            if self.vn_claude:
+                self.vn_claude.connect_to_postgres(
+                    host=settings.db_host,
+                    dbname=settings.db_name,
+                    user=settings.db_user,
+                    password=settings.db_password,
+                    port=settings.db_port
+                )
+                
             self.connected = True
-            logging.info("Connected to Vanna database.")
+            logging.info(f"Connected to Vanna database (LLM: {self.llm_type}).")
             return True
         except Exception as e:
             logging.error(f"Vanna DB connection failed: {e}")

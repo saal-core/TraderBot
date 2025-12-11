@@ -6,3 +6,9 @@ requests
 chromadb
 pydantic-settings
 psycopg2-binary
+anthropic
+langchain
+langchain-community
+langchain-core
+rapidfuzz
+langchain-anthropic
