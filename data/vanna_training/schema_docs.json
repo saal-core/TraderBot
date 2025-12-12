@@ -1,0 +1,12 @@
+[
+  {
+    "table_name": "portfolio_holdings_realized_pnl",
+    "schema_name": "ai_trading",
+    "documentation": "The most detailed table for profit and loss (P&L) analysis. Contains both realized (from sales) and unrealized profits. Use this for specific profit/loss questions."
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "documentation": "Aggregated summary table with high-level performance metrics for each portfolio. Best source for overall portfolio value, returns, and performance across different timeframes (YTD, QTD, MTD, etc.)."
+  }
+]
