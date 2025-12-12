@@ -4,6 +4,7 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from src.config.settings import get_ollama_config
 import os
+import time
 from rapidfuzz import fuzz, process
 
 from dotenv import load_dotenv
@@ -160,7 +161,14 @@ Extracted terms (comma-separated):"""
         extraction_chain = extraction_prompt | self.llm | StrOutputParser()
 
         try:
+            start_time = time.time()
+            print(f"⏱️  Starting: Stock Symbol Extraction...")
+
             result = extraction_chain.invoke({"query": query})
+
+            elapsed = time.time() - start_time
+            print(f"✅ Completed: Stock Symbol Extraction in {elapsed:.2f}s")
+
             result = result.strip()
 
             if result.upper() == "NONE" or not result:
@@ -170,7 +178,8 @@ Extracted terms (comma-separated):"""
             terms = [term.strip() for term in result.split(',') if term.strip()]
             return terms
         except Exception as e:
-            print(f"Error extracting stock symbols: {e}")
+            elapsed = time.time() - start_time
+            print(f"❌ Failed: Stock Symbol Extraction after {elapsed:.2f}s - Error: {e}")
             return []
 
     def _check_symbols_in_database(self, mentioned_terms: List[str]) -> Tuple[List[str], List[str], List[str]]:
@@ -315,7 +324,14 @@ Extracted terms (comma-separated):"""
                     return "internet_comparison"
 
             # Fall back to LLM classification for non-stock queries
+            start_time = time.time()
+            print(f"⏱️  Starting: Query Classification (LLM)...")
+
             response = self.routing_chain.invoke({"query": query})
+
+            elapsed = time.time() - start_time
+            print(f"✅ Completed: Query Classification in {elapsed:.2f}s")
+
             category = response.strip().lower()
 
             # Normalize the response
@@ -330,5 +346,5 @@ Extracted terms (comma-separated):"""
                 return "database"
 
         except Exception as e:
-            print(f"Error in query classification: {e}")
+            print(f"❌ Error in query classification: {e}")
             return "database"  # Default fallback

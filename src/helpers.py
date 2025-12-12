@@ -2,7 +2,9 @@
 import re
 import logging
 import unicodedata
-from typing import List, Dict
+import time
+from typing import List, Dict, Callable, Any
+from functools import wraps
 import ollama
 from config.settings import get_settings
 from config.prompts import (
@@ -13,6 +15,50 @@ from config.prompts import (
 )
 
 settings = get_settings()
+
+
+def time_llm_call(operation_name: str = "LLM Call"):
+    """
+    Decorator to time LLM calls and print execution duration.
+
+    Args:
+        operation_name: Descriptive name for the LLM operation
+
+    Usage:
+        @time_llm_call("Query Classification")
+        def classify_query(query):
+            return llm.invoke(query)
+    """
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args, **kwargs) -> Any:
+            start_time = time.time()
+            print(f"⏱️  Starting: {operation_name}...")
+
+            try:
+                result = func(*args, **kwargs)
+                elapsed = time.time() - start_time
+                print(f"✅ Completed: {operation_name} in {elapsed:.2f}s")
+                return result
+            except Exception as e:
+                elapsed = time.time() - start_time
+                print(f"❌ Failed: {operation_name} after {elapsed:.2f}s - Error: {e}")
+                raise
+
+        return wrapper
+    return decorator
+
+
+def log_llm_timing(operation_name: str, start_time: float):
+    """
+    Helper function to log LLM timing for non-decorator usage.
+
+    Args:
+        operation_name: Descriptive name for the operation
+        start_time: Start time from time.time()
+    """
+    elapsed = time.time() - start_time
+    print(f"✅ {operation_name} completed in {elapsed:.2f}s")
 
 
 def detect_language(text: str) -> str:

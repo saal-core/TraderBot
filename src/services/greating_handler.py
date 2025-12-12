@@ -6,6 +6,7 @@ from langchain_core.output_parsers import StrOutputParser
 from src.config.settings import get_ollama_config
 from src.services.chat_memory import ChatMemory
 import os
+import time
 from rapidfuzz import fuzz, process
 from .query_router import QueryRouter
 from dotenv import load_dotenv
@@ -73,13 +74,20 @@ If asked what you can do, mention that you can help query databases and answer q
             if not history_text or history_text == "No previous conversation.":
                 history_text = "This is the start of the conversation."
 
+            start_time = time.time()
+            print(f"⏱️  Starting: Greeting Response Generation...")
+
             response = self.greeting_chain.invoke({
                 "query": query,
                 "chat_history": history_text
             })
+
+            elapsed = time.time() - start_time
+            print(f"✅ Completed: Greeting Response in {elapsed:.2f}s")
+
             return response.strip()
 
         except Exception as e:
-            print(f"Error generating greeting response: {e}")
+            print(f"❌ Error generating greeting response: {e}")
             return "Hello! I'm here to help you query databases. How can I assist you?"
 

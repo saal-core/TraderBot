@@ -6,6 +6,7 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from src.config.settings import get_ollama_config, get_openai_config
 import os
+import time
 from rapidfuzz import fuzz, process
 from dotenv import load_dotenv
 load_dotenv()
@@ -293,7 +294,14 @@ Extracted terms:"""
         extraction_chain = extraction_prompt | self.llm | StrOutputParser()
 
         try:
+            start_time = time.time()
+            print(f"⏱️  Starting: Stock Mention Extraction...")
+
             result = extraction_chain.invoke({"query": query})
+
+            elapsed = time.time() - start_time
+            print(f"✅ Completed: Stock Mention Extraction in {elapsed:.2f}s")
+
             result = result.strip()
 
             if result.upper() == "NONE" or not result:
@@ -303,7 +311,7 @@ Extracted terms:"""
             terms = [term.strip() for term in result.split(',') if term.strip()]
             return terms
         except Exception as e:
-            print(f"Error extracting stock mentions: {e}")
+            print(f"❌ Error extracting stock mentions: {e}")
             return []
 
     def _match_symbol_from_list(self, extracted_term: str, all_symbols_list: List[str]) -> Optional[str]:
@@ -348,24 +356,30 @@ Matching Symbol:"""
         )
         
         match_chain = match_prompt | self.llm | StrOutputParser()
-        
+
         try:
+            start_time = time.time()
+            print(f"⏱️  Starting: Symbol Matching for '{extracted_term}'...")
+
             # For ~800 symbols, it fits in context.
             # We skip fuzzy pre-filtering because it misses cases like "Apple" -> "AAPL" (score ~22)
-            
+
             result = match_chain.invoke({
                 "term": extracted_term,
                 "symbols": symbols_str
             })
-            
+
+            elapsed = time.time() - start_time
+            print(f"✅ Completed: Symbol Matching in {elapsed:.2f}s")
+
             result = result.strip()
             if result == "NONE" or result not in all_symbols_list:
                 return None
-                
+
             return result
-            
+
         except Exception as e:
-            print(f"Error matching symbol: {e}")
+            print(f"❌ Error matching symbol: {e}")
             return None
 
 
@@ -431,6 +445,9 @@ Matching Symbol:"""
             print(f"  → {matched_symbols}")
 
         # Invoke the chain with all parameters
+        start_time = time.time()
+        print(f"⏱️  Starting: SQL Query Generation...")
+
         sql = self.sql_chain.invoke({
             "schema": schema,
             "portfolio_names": portfolio_names,
@@ -438,6 +455,9 @@ Matching Symbol:"""
             "matched_symbols": matched_symbols,
             "query": query
         })
+
+        elapsed = time.time() - start_time
+        print(f"✅ Completed: SQL Query Generation in {elapsed:.2f}s")
 
         # Clean up the response
         sql = sql.strip()
@@ -490,13 +510,20 @@ Focus on answering the user's question directly with specific numbers and insigh
         explain_chain = explain_prompt | self.explanation_llm | StrOutputParser()
 
         try:
+            start_time = time.time()
+            print(f"⏱️  Starting: Results Explanation Generation...")
+
             explanation = explain_chain.invoke({
                 "query": query,
                 "sql": sql_query,
                 "results": results_text
             })
+
+            elapsed = time.time() - start_time
+            print(f"✅ Completed: Results Explanation in {elapsed:.2f}s")
+
             return explanation.strip()
         except Exception as e:
-            print(f"Error explaining results: {e}")
+            print(f"❌ Error explaining results: {e}")
             return "I found the results but had trouble explaining them."
 
