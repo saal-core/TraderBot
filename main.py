@@ -149,7 +149,7 @@ def display_chat_history():
 
 
 def process_database_query(user_query: str) -> Dict:
-    """Process a database query"""
+    """Process a database query with conversation context"""
     response = {
         "content": "",
         "sql_query": "",
@@ -164,9 +164,12 @@ def process_database_query(user_query: str) -> Dict:
             response["content"] = f"❌ Failed to retrieve database schema: {schema}"
             return response
 
-        # Generate SQL
+        # Get chat history for follow-up questions
+        chat_history = st.session_state.messages
+
+        # Generate SQL with conversation context
         with st.spinner("🤖 Generating SQL query..."):
-            sql_query = st.session_state.db_handler.generate_sql(user_query, schema)
+            sql_query = st.session_state.db_handler.generate_sql(user_query, schema, chat_history)
 
         if sql_query.startswith("ERROR"):
             response["content"] = f"❌ {sql_query}"

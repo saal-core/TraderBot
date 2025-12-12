@@ -5,6 +5,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from src.config.settings import get_ollama_config, get_openai_config
+from src.services.chat_memory import ChatMemory
 import os
 import time
 from rapidfuzz import fuzz, process
@@ -14,7 +15,7 @@ load_dotenv()
 class DatabaseQueryHandler:
     """Handles database-related queries by generating SQL using custom prompt"""
 
-    def __init__(self, model_name: str = None, use_openai: bool = True, sql_executor=None):
+    def __init__(self, model_name: str = None, use_openai: bool = True, sql_executor=None, memory_max_pairs: int = 3):
         """
         Initialize the database query handler
 
@@ -22,9 +23,11 @@ class DatabaseQueryHandler:
             model_name: Name of the model to use (defaults to config)
             use_openai: Whether to use OpenAI for SQL generation (True) or Ollama (False)
             sql_executor: Optional SQL executor for fetching dynamic data
+            memory_max_pairs: Maximum number of Q&A pairs to remember for follow-up questions (default: 3)
         """
         self.sql_executor = sql_executor
         self._symbols_cache = None
+        self.chat_memory = ChatMemory(max_pairs=memory_max_pairs)
 
         # Initialize SQL generation model (OpenAI or Ollama)
         if use_openai:
@@ -60,9 +63,9 @@ class DatabaseQueryHandler:
         # Load custom prompt template
         self.custom_prompt_template = self._load_custom_prompt()
 
-        # Create prompt template with dynamic data
+        # Create prompt template with dynamic data including conversation history
         self.sql_prompt = PromptTemplate(
-            input_variables=["schema", "portfolio_names", "account_ids", "query", "matched_symbols"],
+            input_variables=["schema", "portfolio_names", "account_ids", "query", "matched_symbols", "conversation_history"],
             template=self.custom_prompt_template
         )
 
@@ -85,13 +88,22 @@ class DatabaseQueryHandler:
 
 ---
 
-### **4. Database Schema**
+### **4. Conversation History (for follow-up questions)**
+
+{{conversation_history}}
+
+**Note:** If the current question refers to previous context (e.g., "show more", "what about top 10", "give me details"),
+use the conversation history to understand the full intent. Otherwise, treat as a standalone question.
+
+---
+
+### **5. Database Schema**
 
 {{schema}}
 
 ---
 
-### **5. Available Data (Current State)**
+### **6. Available Data (Current State)**
 
 **Portfolio Names:**
 {{portfolio_names}}
@@ -104,7 +116,7 @@ class DatabaseQueryHandler:
 
 ---
 
-### **6. Output Instructions**
+### **7. Output Instructions**
 
 - You have only the provided portfolio names and account IDs to reference
 - Match user questions to these names/IDs only even if he asks in a different way
@@ -115,10 +127,10 @@ class DatabaseQueryHandler:
 - Always use schema prefix: `ai_trading.table_name`
 - For "current" or "latest" data, filter by: `WHERE datetime = (SELECT MAX(datetime) FROM ai_trading.table_name)`
 - Pay attention to SQL query syntax and correctness
-- Take of comparisons between potfolio names and stocks or group name or account ids
+- Take care of comparisons between portfolio names and stocks or group name or account ids
 ---
 
-### **7. Comparison Guidelines**:
+### **8. Comparison Guidelines**:
 ### **Strategic Logic: Portfolio vs. Stock Comparison**
 
 **The Core Problem:**
@@ -192,6 +204,39 @@ CROSS JOIN stock_stats s;
 ### **SQL Query:**"""
 
         return full_template
+
+    def _format_conversation_history(self, chat_history: List[Dict[str, str]]) -> str:
+        """
+        Format conversation history for SQL generation context
+
+        Args:
+            chat_history: List of previous messages
+
+        Returns:
+            Formatted conversation history string
+        """
+        if not chat_history:
+            return "No previous conversation (this is the first question)."
+
+        # Get last 3 Q&A pairs using chat memory
+        recent_messages = self.chat_memory.get_context_messages(chat_history)
+
+        if not recent_messages:
+            return "No previous conversation (this is the first question)."
+
+        # Format as Q&A pairs for better context
+        formatted_lines = []
+        for msg in recent_messages:
+            role = msg.get("role", "").capitalize()
+            content = msg.get("content", "")
+
+            # Truncate very long responses to keep context manageable
+            if len(content) > 200:
+                content = content[:200] + "..."
+
+            formatted_lines.append(f"{role}: {content}")
+
+        return "\n".join(formatted_lines)
 
     def _get_portfolio_names(self) -> str:
         """Fetch distinct portfolio names from database"""
@@ -417,21 +462,27 @@ Matching Symbol:"""
         else:
             return f"No close matches found for: {', '.join(mentioned_terms)}"
 
-    def generate_sql(self, query: str, schema: str) -> str:
+    def generate_sql(self, query: str, schema: str, chat_history: List[Dict[str, str]] = None) -> str:
         """
-        Generate SQL query from natural language question with fuzzy stock matching
+        Generate SQL query from natural language question with fuzzy stock matching and conversation context
 
         Args:
             query: User's natural language question
             schema: Database schema information
+            chat_history: Previous conversation history for follow-up questions
 
         Returns:
             Generated SQL query string
         """
-        # try:
+        if chat_history is None:
+            chat_history = []
+
         # Get dynamic data from database
         portfolio_names = self._get_portfolio_names()
         account_ids = self._get_account_ids()
+
+        # Format conversation history for context
+        conversation_text = self._format_conversation_history(chat_history)
 
         # Check for stock mentions and fuzzy match
         print("  → Checking for stock mentions...")
@@ -444,7 +495,7 @@ Matching Symbol:"""
             matched_symbols = self._fuzzy_match_symbols(mentioned_terms, symbols_dict)
             print(f"  → {matched_symbols}")
 
-        # Invoke the chain with all parameters
+        # Invoke the chain with all parameters including conversation history
         start_time = time.time()
         print(f"⏱️  Starting: SQL Query Generation...")
 
@@ -453,6 +504,7 @@ Matching Symbol:"""
             "portfolio_names": portfolio_names,
             "account_ids": account_ids,
             "matched_symbols": matched_symbols,
+            "conversation_history": conversation_text,
             "query": query
         })
 
