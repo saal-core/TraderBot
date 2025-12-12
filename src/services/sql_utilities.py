@@ -5,14 +5,140 @@ Handles SQL query execution and validation for text-to-SQL chatbot with PostgreS
 
 import re
 from typing import Tuple, Optional, Any, Dict
+from contextlib import contextmanager
 import pandas as pd
 import psycopg2
 from psycopg2 import pool, sql
 from psycopg2.extras import RealDictCursor
 from src.config.settings import get_postgres_config
-import os 
+import os
+import threading
 from dotenv import load_dotenv
 load_dotenv()
+
+
+class ConnectionPoolManager:
+    """
+    Singleton connection pool manager for multi-user applications.
+    Ensures only ONE connection pool is created and shared across all sessions.
+    """
+    _instance = None
+    _lock = threading.Lock()
+
+    def __new__(cls, connection_config: Dict[str, Any] = None):
+        """Thread-safe singleton implementation"""
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
+        return cls._instance
+
+    def __init__(self, connection_config: Dict[str, Any] = None):
+        """Initialize the shared connection pool (only once)"""
+        if self._initialized:
+            return
+
+        self.connection_config = connection_config or get_postgres_config()
+        self.connection_pool = None
+        self._initialize_connection_pool()
+        self._initialized = True
+
+    def _initialize_connection_pool(self):
+        """Initialize the shared connection pool"""
+        try:
+            # Get pool size from environment with proper int casting
+            min_connections = int(os.getenv("POSTGRES_MIN_CONNECTIONS", "2"))
+            max_connections = int(os.getenv("POSTGRES_MAX_CONNECTIONS", "30"))
+
+            print(f"🔄 Initializing SHARED connection pool (min={min_connections}, max={max_connections})...")
+
+            if "connection_string" in self.connection_config:
+                self.connection_pool = pool.ThreadedConnectionPool(
+                    min_connections,
+                    max_connections,
+                    self.connection_config["connection_string"],
+                    connect_timeout=10,
+                    keepalives=1,
+                    keepalives_idle=30,
+                    keepalives_interval=10,
+                    keepalives_count=5
+                )
+            else:
+                self.connection_pool = pool.ThreadedConnectionPool(
+                    min_connections,
+                    max_connections,
+                    host=self.connection_config["host"],
+                    port=self.connection_config["port"],
+                    database=self.connection_config["database"],
+                    user=self.connection_config["user"],
+                    password=self.connection_config["password"],
+                    options=self.connection_config.get("options", ""),
+                    connect_timeout=10,
+                    keepalives=1,
+                    keepalives_idle=30,
+                    keepalives_interval=10,
+                    keepalives_count=5
+                )
+            print(f"✅ SHARED PostgreSQL connection pool initialized successfully")
+            print(f"   This pool will be used by ALL user sessions")
+        except Exception as e:
+            print(f"❌ Error initializing shared connection pool: {e}")
+            self.connection_pool = None
+
+    def get_connection(self):
+        """Get a connection from the shared pool (thread-safe)"""
+        if self.connection_pool:
+            try:
+                conn = self.connection_pool.getconn()
+                if conn:
+                    # Reset the connection to ensure clean state
+                    conn.rollback()
+                return conn
+            except pool.PoolError as e:
+                print(f"❌ Connection pool error: {e}")
+                print(f"   Pool status: {self.get_pool_status()}")
+                raise
+        return None
+
+    def return_connection(self, conn):
+        """Return a connection to the shared pool (thread-safe)"""
+        if self.connection_pool and conn:
+            try:
+                # Ensure any pending transaction is closed before returning
+                if not conn.closed:
+                    conn.rollback()
+                self.connection_pool.putconn(conn)
+            except Exception as e:
+                print(f"⚠️ Error returning connection to pool: {e}")
+                # Try to close the connection if we can't return it
+                try:
+                    conn.close()
+                except:
+                    pass
+
+    def get_pool_status(self) -> dict:
+        """Get current connection pool status for debugging"""
+        if not self.connection_pool:
+            return {"status": "not_initialized"}
+
+        try:
+            pool_obj = self.connection_pool
+            return {
+                "status": "active",
+                "pool_type": "ThreadedConnectionPool (multi-user safe)",
+                "min_connections": pool_obj.minconn,
+                "max_connections": pool_obj.maxconn,
+                "closed": pool_obj.closed
+            }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    def close(self):
+        """Close all connections in the shared pool"""
+        if self.connection_pool:
+            self.connection_pool.closeall()
+            print("✅ Shared connection pool closed")
 
 class SQLValidator:
     """Validates SQL queries to ensure they are safe SELECT queries only"""
@@ -91,56 +217,61 @@ class SQLValidator:
 
 
 class PostgreSQLExecutor:
-    """Executes SQL queries against a PostgreSQL database"""
+    """
+    Executes SQL queries against a PostgreSQL database.
+    Uses a SHARED connection pool (singleton) for multi-user applications.
+    """
 
     def __init__(self, connection_config: Dict[str, Any] = None):
         """
-        Initialize PostgreSQL executor
+        Initialize PostgreSQL executor with shared connection pool
 
         Args:
             connection_config: PostgreSQL connection configuration
                              If None, uses config from config.py
         """
-        self.connection_config = connection_config or get_postgres_config()
         self.validator = SQLValidator()
-        self.connection_pool = None
-        self._initialize_connection_pool()
-
-    def _initialize_connection_pool(self):
-        """Initialize connection pool for better performance"""
-        try:
-            if "connection_string" in self.connection_config:
-                self.connection_pool = pool.SimpleConnectionPool(
-                    os.getenv("POSTGRES_MIN_CONNECTIONS", 1),
-                    os.getenv("POSTGRES_MAX_CONNECTIONS", 10),
-                    self.connection_config["connection_string"]
-                )
-            else:
-                self.connection_pool = pool.SimpleConnectionPool(
-                    os.getenv("POSTGRES_MIN_CONNECTIONS", 1),
-                    os.getenv("POSTGRES_MAX_CONNECTIONS", 10),
-                    host=self.connection_config["host"],
-                    port=self.connection_config["port"],
-                    database=self.connection_config["database"],
-                    user=self.connection_config["user"],
-                    password=self.connection_config["password"],
-                    options=self.connection_config.get("options", "")
-                )
-            print("✅ PostgreSQL connection pool initialized successfully")
-        except Exception as e:
-            print(f"❌ Error initializing connection pool: {e}")
-            self.connection_pool = None
+        # Use the shared singleton connection pool manager
+        self.pool_manager = ConnectionPoolManager(connection_config)
+        print(f"📌 PostgreSQLExecutor initialized (using shared pool)")
 
     def get_connection(self):
-        """Get a connection from the pool"""
-        if self.connection_pool:
-            return self.connection_pool.getconn()
-        return None
+        """Get a connection from the shared pool (thread-safe)"""
+        return self.pool_manager.get_connection()
 
     def return_connection(self, conn):
-        """Return a connection to the pool"""
-        if self.connection_pool and conn:
-            self.connection_pool.putconn(conn)
+        """Return a connection to the shared pool (thread-safe)"""
+        self.pool_manager.return_connection(conn)
+
+    def get_pool_status(self) -> dict:
+        """
+        Get current connection pool status for debugging
+
+        Returns:
+            Dictionary with pool statistics
+        """
+        return self.pool_manager.get_pool_status()
+
+    @contextmanager
+    def get_connection_context(self):
+        """
+        Context manager for safe connection handling
+        Ensures connections are always returned to the pool
+
+        Usage:
+            with executor.get_connection_context() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM table")
+        """
+        conn = None
+        try:
+            conn = self.get_connection()
+            if not conn:
+                raise RuntimeError("Failed to get database connection")
+            yield conn
+        finally:
+            if conn:
+                self.return_connection(conn)
 
     def execute_query(self, query: str, params: tuple = None) -> Tuple[bool, Any, str]:
         """
@@ -158,22 +289,30 @@ class PostgreSQLExecutor:
         if not is_valid:
             return False, None, error_msg
 
+        conn = None
+        try:
+            conn = self.get_connection()
+            if not conn:
+                return False, None, "Failed to get database connection"
 
-        conn = self.get_connection()
-        if not conn:
-            return False, None, "Failed to get database connection"
+            # Execute query with pandas
+            df = pd.read_sql_query(query, conn, params=params)
 
-        # Execute query with pandas
-        df = pd.read_sql_query(query, conn, params=params)
+            # Check for max rows limit
+            if len(df) > 1000:
+                return True, df.head(), f"Query returned {len(df)} rows"
 
-        # Check for max rows limit
-        if len(df) > 1000:
-            return True, df.head(), f"Query returned {len(df)} rows"
+            if df.empty:
+                return True, df, "Query executed successfully but returned no results"
 
-        if df.empty:
-            return True, df, "Query executed successfully but returned no results"
+            return True, df, f"Query executed successfully. Returned {len(df)} rows"
 
-        return True, df, f"Query executed successfully. Returned {len(df)} rows"
+        except Exception as e:
+            return False, None, f"Query execution error: {str(e)}"
+        finally:
+            # CRITICAL: Always return connection to pool
+            if conn:
+                self.return_connection(conn)
 
 
     def get_schema_info(self, schema: str = None) -> str:
@@ -189,78 +328,71 @@ class PostgreSQLExecutor:
         if schema is None:
             schema = os.getenv("DB_SCHEMA", "public")
 
-        conn = None
         try:
-            conn = self.get_connection()
-            if not conn:
-                return "Error: Failed to get database connection"
+            with self.get_connection_context() as conn:
+                cursor = conn.cursor()
 
-            cursor = conn.cursor()
-
-            # Get all tables in the schema
-            cursor.execute("""
-                SELECT table_name
-                FROM information_schema.tables
-                WHERE table_schema = %s
-                AND table_type = 'BASE TABLE'
-                ORDER BY table_name;
-            """, (schema,))
-
-            tables = cursor.fetchall()
-
-            if not tables:
-                return f"No tables found in schema '{schema}'"
-
-            schema_info = f"Database Schema (Schema: {schema}):\n\n"
-
-            for (table_name,) in tables:
-                schema_info += f"Table: {table_name}\n"
-
-                # Get column information
+                # Get all tables in the schema
                 cursor.execute("""
-                    SELECT
-                        column_name,
-                        data_type,
-                        is_nullable,
-                        column_default
-                    FROM information_schema.columns
+                    SELECT table_name
+                    FROM information_schema.tables
                     WHERE table_schema = %s
-                    AND table_name = %s
-                    ORDER BY ordinal_position;
-                """, (schema, table_name))
+                    AND table_type = 'BASE TABLE'
+                    ORDER BY table_name;
+                """, (schema,))
 
-                columns = cursor.fetchall()
+                tables = cursor.fetchall()
 
-                for col_name, col_type, is_nullable, col_default in columns:
-                    nullable = "" if is_nullable == "YES" else "NOT NULL"
-                    default = f"DEFAULT {col_default}" if col_default else ""
-                    schema_info += f"  - {col_name} ({col_type}) {nullable} {default}\n".strip() + "\n"
+                if not tables:
+                    return f"No tables found in schema '{schema}'"
 
-                # Get primary key information
-                cursor.execute("""
-                    SELECT a.attname
-                    FROM pg_index i
-                    JOIN pg_attribute a ON a.attrelid = i.indrelid
-                        AND a.attnum = ANY(i.indkey)
-                    WHERE i.indrelid = %s::regclass
-                    AND i.indisprimary;
-                """, (f"{schema}.{table_name}",))
+                schema_info = f"Database Schema (Schema: {schema}):\n\n"
 
-                pk_columns = cursor.fetchall()
-                if pk_columns:
-                    pk_list = ", ".join([col[0] for col in pk_columns])
-                    schema_info += f"  PRIMARY KEY: ({pk_list})\n"
+                for (table_name,) in tables:
+                    schema_info += f"Table: {table_name}\n"
 
-                schema_info += "\n"
+                    # Get column information
+                    cursor.execute("""
+                        SELECT
+                            column_name,
+                            data_type,
+                            is_nullable,
+                            column_default
+                        FROM information_schema.columns
+                        WHERE table_schema = %s
+                        AND table_name = %s
+                        ORDER BY ordinal_position;
+                    """, (schema, table_name))
 
-            cursor.close()
-            return schema_info
+                    columns = cursor.fetchall()
+
+                    for col_name, col_type, is_nullable, col_default in columns:
+                        nullable = "" if is_nullable == "YES" else "NOT NULL"
+                        default = f"DEFAULT {col_default}" if col_default else ""
+                        schema_info += f"  - {col_name} ({col_type}) {nullable} {default}\n".strip() + "\n"
+
+                    # Get primary key information
+                    cursor.execute("""
+                        SELECT a.attname
+                        FROM pg_index i
+                        JOIN pg_attribute a ON a.attrelid = i.indrelid
+                            AND a.attnum = ANY(i.indkey)
+                        WHERE i.indrelid = %s::regclass
+                        AND i.indisprimary;
+                    """, (f"{schema}.{table_name}",))
+
+                    pk_columns = cursor.fetchall()
+                    if pk_columns:
+                        pk_list = ", ".join([col[0] for col in pk_columns])
+                        schema_info += f"  PRIMARY KEY: ({pk_list})\n"
+
+                    schema_info += "\n"
+
+                cursor.close()
+                return schema_info
 
         except Exception as e:
             return f"Error retrieving schema: {str(e)}"
-        finally:
-            if conn:
-                self.return_connection(conn)
 
     def test_connection(self) -> Tuple[bool, str]:
         """
@@ -269,34 +401,33 @@ class PostgreSQLExecutor:
         Returns:
             Tuple of (success, message)
         """
-        conn = None
         try:
-            conn = self.get_connection()
-            if not conn:
-                return False, "Failed to get database connection"
+            with self.get_connection_context() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT version();")
+                version = cursor.fetchone()[0]
+                cursor.close()
 
-            cursor = conn.cursor()
-            cursor.execute("SELECT version();")
-            version = cursor.fetchone()[0]
-            cursor.close()
-
-            return True, f"✅ Connected successfully. PostgreSQL version: {version}"
+                return True, f"✅ Connected successfully. PostgreSQL version: {version}"
 
         except Exception as e:
             return False, f"❌ Connection failed: {str(e)}"
-        finally:
-            if conn:
-                self.return_connection(conn)
 
     def close(self):
-        """Close all connections in the pool"""
-        if self.connection_pool:
-            self.connection_pool.closeall()
-            print("✅ All database connections closed")
+        """
+        Close all connections in the shared pool.
+        Note: In multi-user apps, this should only be called on app shutdown,
+        not when individual sessions end.
+        """
+        print("⚠️ Warning: Closing shared connection pool (affects all users)")
+        self.pool_manager.close()
 
     def __del__(self):
-        """Destructor to ensure connections are closed"""
-        self.close()
+        """
+        Destructor - does NOT close the shared pool.
+        The shared pool persists across all sessions.
+        """
+        pass  # Don't close the shared pool when individual executor instances are destroyed
 
 # For backward compatibility, create an alias
 SQLExecutor = PostgreSQLExecutor

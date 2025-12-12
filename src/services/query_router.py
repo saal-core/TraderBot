@@ -41,13 +41,26 @@ class QueryRouter:
             template="""You are a query classifier. Classify the following user query into ONE of these categories:
 
 Categories:
-1. "database" - Questions about data in a local database (e.g., "show me all customers", "what are the total sales")
+1. "database" - Questions about data in a local database, including:
+   - Portfolio holdings, positions, quantities, lots
+   - Stock performance, profit/loss, unrealized gains
+   - Portfolio statistics, returns, values, metrics
+   - Rankings, comparisons, aggregations of local data (e.g., "highest profit", "best performing", "top 10 stocks")
+   - Current state of holdings (e.g., "which stock has the highest value right now")
+   Examples: "show me all portfolios", "which stock has the highest profit", "what are my holdings", "top 5 stocks by return"
+
 2. "greeting" - Greetings, chitchat, hello, how are you, goodbye, thank you, etc.
-3. "internet_comparison" - Questions that require fetching internet data and comparing with local data (e.g., "compare our prices with competitors", "how do our sales compare to market trends")
+
+3. "internet_comparison" - Questions that EXPLICITLY require fetching EXTERNAL internet data and comparing with local data:
+   - Must mention external entities NOT in our database (like market indices: SPY, S&P 500, NASDAQ,)
+   - Must involve comparison between our data and external/market data
+   Examples: "compare our portfolio with QQQ", "how do we perform vs the market", "benchmark against S&P 500"
 
 Rules:
 - Return ONLY the category name: database, greeting, or internet_comparison
 - Do not include any explanation or additional text
+- Questions about local data analysis, rankings, or comparisons within our database = "database"
+- Only use "internet_comparison" when external data is EXPLICITLY needed
 - If unsure, default to "database" for data-related queries
 
 User Query: {query}
@@ -246,6 +259,28 @@ Extracted terms (comma-separated):"""
             Category string: "database", "greeting", or "internet_comparison"
         """
         try:
+            # Check for database-related keywords that indicate local data queries
+            database_keywords = [
+                'holding', 'holdings', 'portfolio', 'position', 'positions',
+                'unrealized', 'profit', 'loss', 'gain', 'return',
+                'my stock', 'my stocks', 'our stock', 'our stocks',
+                'quantity', 'lot', 'lots', 'shares', 'invested',
+                'total value', 'market value', 'cost basis'
+            ]
+
+            query_lower = query.lower()
+            has_database_keywords = any(keyword in query_lower for keyword in database_keywords)
+
+            # Check for external market indicators
+            external_market_keywords = ['qqq', 'spy', 's&p 500', 's&p500', 'market index',
+                                       'nasdaq', 'dow jones', 'benchmark against']
+            has_external_keywords = any(keyword in query_lower for keyword in external_market_keywords)
+
+            # If it has database keywords and NO external market keywords, route to database
+            if has_database_keywords and not has_external_keywords:
+                print(f"  → Query contains database keywords, routing to 'database'")
+                return "database"
+
             # First, check if query mentions any stocks
             mentioned_terms = self._extract_stock_symbols(query)
 
