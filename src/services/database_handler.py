@@ -15,7 +15,7 @@ load_dotenv()
 class DatabaseQueryHandler:
     """Handles database-related queries by generating SQL using custom prompt"""
 
-    def __init__(self, model_name: str = None, use_openai: bool = True, sql_executor=None, memory_max_pairs: int = 3):
+    def __init__(self, model_name: str = None, use_openai: bool = True, sql_executor=None, memory_max_pairs: int = 5):
         """
         Initialize the database query handler
 
