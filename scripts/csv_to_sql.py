@@ -9,7 +9,7 @@ containing the extracted SQL queries. Each query is preceded by comments with
 
 Usage:
     python scripts/csv_to_sql.py                    # reads benchmark_results.csv -> generated_queries.sql
-    python scripts/csv_to_sql.py -i results.csv -o out.sql --include-non-sql
+    /bin/python3 scripts/csv_to_sql.py -i benchmark_results.csv -o out.sql --include-non-sql
 
 The script will skip rows that don't look like SQL by default. Use
 `--include-non-sql` to include everything.

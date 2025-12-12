@@ -175,7 +175,8 @@ class PostgreSQLExecutor:
                 return True, df, "Query executed successfully but returned no results"
 
             return True, df, f"Query executed successfully. Returned {len(df)} rows"
-        
+        except Exception as e:
+            return False, None, f"Error executing query: {str(e)}"
         finally:
             # Always return connection to the pool
             if conn:

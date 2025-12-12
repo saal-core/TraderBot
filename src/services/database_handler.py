@@ -1,6 +1,7 @@
 
 from langchain_community.llms import Ollama
 from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from src.config.settings import get_ollama_config
@@ -21,7 +22,7 @@ class DatabaseQueryHandler:
             model_name: Name of the Ollama model to use (defaults to config)
             ollama_base_url: Base URL for Ollama API (defaults to config)
             sql_executor: Optional SQL executor for fetching dynamic data
-            llm_type: "gpt-oss" or "claude"
+            llm_type: "gpt-oss", "claude", or "gpt-4.1"
         """
         ollama_config = get_ollama_config()
 
@@ -41,6 +42,20 @@ class DatabaseQueryHandler:
             api_key = os.getenv("ANTHROPIC_API_KEY")
             self.llm = ChatAnthropic(
                 model="claude-sonnet-4-5-20250929",
+                api_key=api_key,
+                temperature=0.0
+            )
+        elif self.llm_type == "gpt-4.1":
+            api_key = os.getenv("OPENAI_API_KEY")
+            self.llm = ChatOpenAI(
+                model="gpt-4.1",
+                api_key=api_key,
+                temperature=0.0
+            )
+        elif self.llm_type == "gpt-5.1":
+            api_key = os.getenv("OPENAI_API_KEY")
+            self.llm = ChatOpenAI(
+                model="gpt-5.1",
                 api_key=api_key,
                 temperature=0.0
             )

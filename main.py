@@ -86,13 +86,15 @@ def initialize_session_state():
 
     if "sql_executor" not in st.session_state:
         st.session_state.sql_executor = None
+    
+    if "selected_llm_type" not in st.session_state:
+        st.session_state.selected_llm_type = "gpt-oss"  # Default to Ollama
 
 
 def initialize_handlers():
     """Initialize all handlers and database connection"""
     try:
         with st.spinner("Initializing chatbot components..."):
-
 
             ollama_config = get_ollama_config()
 
@@ -109,12 +111,18 @@ def initialize_handlers():
 
             # Initialize LLM handlers (pass sql_executor to db_handler for dynamic data)
             st.session_state.router = QueryRouter()
-            st.session_state.db_handler = DatabaseQueryHandler(sql_executor=st.session_state.sql_executor)
+            
+            # Use selected LLM type for database query handler
+            llm_type = st.session_state.get("selected_llm_type", "gpt-oss")
+            st.session_state.db_handler = DatabaseQueryHandler(
+                sql_executor=st.session_state.sql_executor,
+                llm_type=llm_type
+            )
             st.session_state.greeting_handler = GreetingHandler()
             # st.session_state.comparison_handler = InternetComparisonHandler()
 
             st.session_state.db_initialized = True
-            st.success("✅ All components initialized successfully!")
+            st.success(f"✅ All components initialized successfully! Using {llm_type} for SQL generation.")
             return True
 
     except Exception as e:
@@ -248,6 +256,28 @@ def main():
     # Sidebar configuration
     with st.sidebar:
         st.header("⚙️ Configuration")
+
+        # LLM Selection for SQL Generation
+        st.subheader("🧠 SQL Generation Model")
+        llm_choice = st.radio(
+            "Choose LLM for SQL generation:",
+            options=["Ollama (Local)", "Claude (Anthropic)", "GPT-4 (OpenAI)"],
+            index=0,
+            help="Select which model to use for generating SQL queries"
+        )
+        
+        # Map selection to llm_type
+        llm_type_map = {
+            "Ollama (Local)": "gpt-oss",
+            "Claude (Anthropic)": "claude",
+            "GPT-4 (OpenAI)": "gpt-4.1"
+        }
+        selected_llm_type = llm_type_map[llm_choice]
+        
+        # Store in session state for use when initializing handlers
+        st.session_state.selected_llm_type = selected_llm_type
+        
+        st.divider()
 
         # Display current configuration
         ollama_config = get_ollama_config()
