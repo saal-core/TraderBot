@@ -46,6 +46,21 @@ def get_ollama_config() -> Dict[str, Any]:
     }
 
 
+def get_openai_config() -> Dict[str, Any]:
+    """
+    Get OpenAI configuration as a dictionary
+
+    Returns:
+        Dictionary containing OpenAI configuration
+    """
+    return {
+        "api_key": os.getenv("OPENAI_API_KEY"),
+        "model_name": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+        "temperature_routing": float(os.getenv("OPENAI_TEMPERATURE_ROUTING", "0.1")),
+        "temperature_sql": float(os.getenv("OPENAI_TEMPERATURE_SQL", "0.0")),
+    }
+
+
 def get_app_config() -> Dict[str, Any]:
     """
     Get application configuration as a dictionary

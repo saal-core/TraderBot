@@ -11,6 +11,7 @@ from src.services.sql_utilities import PostgreSQLExecutor
 from src.services.query_router import QueryRouter
 from src.services.database_handler import DatabaseQueryHandler
 from src.services.greating_handler import GreetingHandler
+from src.services.chat_memory import ChatMemory
 # from src.services.perplexity_service import InternetComparisonHandler
 from dotenv import load_dotenv
 load_dotenv()
@@ -87,6 +88,10 @@ def initialize_session_state():
     if "sql_executor" not in st.session_state:
         st.session_state.sql_executor = None
 
+    if "chat_memory" not in st.session_state:
+        # Initialize chat memory with 5 Q&A pairs
+        st.session_state.chat_memory = ChatMemory(max_pairs=5)
+
 
 def initialize_handlers():
     """Initialize all handlers and database connection"""
@@ -107,8 +112,8 @@ def initialize_handlers():
 
             st.success(message)
 
-            # Initialize LLM handlers (pass sql_executor to db_handler for dynamic data)
-            st.session_state.router = QueryRouter()
+            # Initialize LLM handlers (pass sql_executor to both router and db_handler for dynamic data)
+            st.session_state.router = QueryRouter(sql_executor=st.session_state.sql_executor)
             st.session_state.db_handler = DatabaseQueryHandler(sql_executor=st.session_state.sql_executor)
             st.session_state.greeting_handler = GreetingHandler()
             # st.session_state.comparison_handler = InternetComparisonHandler()
@@ -192,7 +197,7 @@ def process_database_query(user_query: str) -> Dict:
 
 
 def process_greeting(user_query: str) -> Dict:
-    """Process a greeting or chitchat"""
+    """Process a greeting or chitchat with memory"""
     response = {
         "content": "",
         "sql_query": None,
@@ -201,11 +206,8 @@ def process_greeting(user_query: str) -> Dict:
 
     try:
         with st.spinner("💬 Generating response..."):
-            # Get chat history for context
-            chat_history = [
-                {"role": msg["role"], "content": msg["content"]}
-                for msg in st.session_state.messages[-os.getenv("MAX_CHAT_HISTORY", 5):]
-            ]
+            # Use chat memory to get context (automatically handles last N pairs)
+            chat_history = st.session_state.messages
 
             greeting_response = st.session_state.greeting_handler.respond(user_query, chat_history)
             response["content"] = f"{greeting_response}"
@@ -308,6 +310,11 @@ def main():
             })
 
         st.divider()
+
+        # Display chat memory stats
+        if st.session_state.chat_memory and st.session_state.messages:
+            pairs_count = st.session_state.chat_memory.count_pairs(st.session_state.messages)
+            st.info(f"💬 Chat Memory: {pairs_count}/5 Q&A pairs")
 
         if st.button("🗑️ Clear Chat History", use_container_width=True):
             st.session_state.messages = []

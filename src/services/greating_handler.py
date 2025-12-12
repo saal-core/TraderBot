@@ -4,6 +4,7 @@ from langchain_community.llms import Ollama
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from src.config.settings import get_ollama_config
+from src.services.chat_memory import ChatMemory
 import os
 from rapidfuzz import fuzz, process
 from .query_router import QueryRouter
@@ -11,21 +12,23 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class GreetingHandler:
-    """Handles greetings and chitchat"""
+    """Handles greetings and chitchat with conversation memory"""
 
-    def __init__(self, model_name: str = None, ollama_base_url: str = None):
+    def __init__(self, model_name: str = None, ollama_base_url: str = None, memory_max_pairs: int = 5):
         """
         Initialize the greeting handler
 
         Args:
             model_name: Name of the Ollama model to use (defaults to config)
             ollama_base_url: Base URL for Ollama API (defaults to config)
+            memory_max_pairs: Maximum number of Q&A pairs to remember (default: 5)
         """
         ollama_config = get_ollama_config()
 
         self.model_name = model_name or ollama_config["model_name"]
         self.base_url = ollama_base_url or ollama_config["base_url"]
         self.temperature = ollama_config["temperature_greeting"]
+        self.chat_memory = ChatMemory(max_pairs=memory_max_pairs)
 
         self.llm = Ollama(
             model=self.model_name,
@@ -50,11 +53,11 @@ If asked what you can do, mention that you can help query databases and answer q
 
     def respond(self, query: str, chat_history: List[Dict[str, str]] = None) -> str:
         """
-        Generate a response to a greeting or chitchat
+        Generate a response to a greeting or chitchat with memory context
 
         Args:
             query: User's greeting or chitchat message
-            chat_history: Optional chat history
+            chat_history: Full chat history (will use last N pairs automatically)
 
         Returns:
             Friendly response string
@@ -63,8 +66,13 @@ If asked what you can do, mention that you can help query databases and answer q
             chat_history = []
 
         try:
-            context_size = int(os.getenv("CHAT_HISTORY_CONTEXT_SIZE", 5))
-            history_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in chat_history[-context_size:]])
+            # Use ChatMemory to get relevant context
+            context_messages = self.chat_memory.get_context_messages(chat_history)
+            history_text = self.chat_memory.get_summary_text(chat_history)
+
+            if not history_text or history_text == "No previous conversation.":
+                history_text = "This is the start of the conversation."
+
             response = self.greeting_chain.invoke({
                 "query": query,
                 "chat_history": history_text

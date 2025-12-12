@@ -1,9 +1,10 @@
 
 from typing import Dict, List, Tuple, Optional
 from langchain_community.llms import Ollama
+from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from src.config.settings import get_ollama_config
+from src.config.settings import get_ollama_config, get_openai_config
 import os
 from rapidfuzz import fuzz, process
 from dotenv import load_dotenv
@@ -12,29 +13,47 @@ load_dotenv()
 class DatabaseQueryHandler:
     """Handles database-related queries by generating SQL using custom prompt"""
 
-    def __init__(self, model_name: str = None, ollama_base_url: str = None, sql_executor=None):
+    def __init__(self, model_name: str = None, use_openai: bool = True, sql_executor=None):
         """
         Initialize the database query handler
 
         Args:
-            model_name: Name of the Ollama model to use (defaults to config)
-            ollama_base_url: Base URL for Ollama API (defaults to config)
+            model_name: Name of the model to use (defaults to config)
+            use_openai: Whether to use OpenAI for SQL generation (True) or Ollama (False)
             sql_executor: Optional SQL executor for fetching dynamic data
         """
-        ollama_config = get_ollama_config()
-
-        self.model_name = model_name or ollama_config["model_name"]
-        self.base_url = ollama_base_url or ollama_config["base_url"]
-        self.temperature = ollama_config["temperature_sql"]
         self.sql_executor = sql_executor
-
-        # Cache for symbols dictionary
         self._symbols_cache = None
 
-        self.llm = Ollama(
-            model=self.model_name,
-            base_url=self.base_url,
-            temperature=self.temperature
+        # Initialize SQL generation model (OpenAI or Ollama)
+        if use_openai:
+            openai_config = get_openai_config()
+            self.model_name = model_name or openai_config["model_name"]
+            self.temperature = openai_config["temperature_sql"]
+
+            self.llm = ChatOpenAI(
+                model=self.model_name,
+                temperature=self.temperature,
+                api_key=openai_config["api_key"]
+            )
+        else:
+            ollama_config = get_ollama_config()
+            self.model_name = model_name or ollama_config["model_name"]
+            self.base_url = ollama_config["base_url"]
+            self.temperature = ollama_config["temperature_sql"]
+
+            self.llm = Ollama(
+                model=self.model_name,
+                base_url=self.base_url,
+                temperature=self.temperature
+            )
+
+        # Always use Ollama for explanations
+        ollama_config = get_ollama_config()
+        self.explanation_llm = Ollama(
+            model=ollama_config["model_name"],
+            base_url=ollama_config["base_url"],
+            temperature=ollama_config["temperature_greeting"]  # Use moderate temperature for explanations
         )
 
         # Load custom prompt template
@@ -95,9 +114,75 @@ class DatabaseQueryHandler:
 - Always use schema prefix: `ai_trading.table_name`
 - For "current" or "latest" data, filter by: `WHERE datetime = (SELECT MAX(datetime) FROM ai_trading.table_name)`
 - Pay attention to SQL query syntax and correctness
-- If the query cannot be answered with the given schema, return "ERROR: Cannot generate query"
-
+- Take of comparisons between potfolio names and stocks or group name or account ids
 ---
+
+### **7. Comparison Guidelines**:
+### **Strategic Logic: Portfolio vs. Stock Comparison**
+
+**The Core Problem:**
+
+  * **Portfolios** (in `portfolio_summary`) have explicit **Percentage Return** metrics (e.g., `ytd_return`).
+  * **Stocks** (in `portfolio_holdings`) **DO NOT** have a pre-calculated percentage return column. They only have **Dollar Value** and **Dollar Profit** (`ytd_total_pnl`).
+
+**The Rule:**
+**"Compare Apples to Apples (Dollars to Dollars)."**
+Since you cannot safely calculate the stock's percentage return (due to buy/sell timing affecting the cost basis), you must compare them based on **Total Profit (PnL)** or **Market Value**.
+
+-----
+
+### **Step-by-Step Execution Plan**
+
+1.  **Identify the Entities:**
+
+      * **Entity A (Portfolio):** "A-Balanced" $\rightarrow$ Source: `ai_trading.portfolio_summary`
+      * **Entity B (Stock):** "QQQ" $\rightarrow$ Source: `ai_trading.portfolio_holdings_realized_pnl` (Use this table because it captures Total PnL = Realized + Unrealized).
+
+2.  **Select the Common Metric:**
+
+      * **Metric:** **Year-to-Date Profit (YTD PnL)**.
+      * *Portfolio Mapping:* `ytd_profit`
+      * *Stock Mapping:* `ytd_total_pnl` (This is the equivalent of `ytd_profit` for a specific stock).
+
+3.  **Construct the Query:**
+
+      * Use a **Common Table Expression (CTE)** for each entity to ensure you get the `MAX(datetime)` for both independently.
+      * Join them on `1=1` (Cross Join) since they are unrelated entities, just to display them in one row.
+
+-----
+
+### **The Gold Standard SQL Query**
+
+```sql
+WITH portfolio_stats AS (
+    SELECT 
+        portfolio_name, 
+        ytd_profit AS portfolio_pnl, 
+        ytd_return AS portfolio_return_pct -- Include for context, even if comparing PnL
+    FROM ai_trading.portfolio_summary
+    WHERE portfolio_name = 'A-Balanced'
+      AND datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_summary WHERE portfolio_name = 'A-Balanced')
+),
+stock_stats AS (
+    SELECT 
+        symbol, 
+        ytd_total_pnl AS stock_pnl, 
+        market_value AS stock_current_value
+    FROM ai_trading.portfolio_holdings_realized_pnl
+    WHERE symbol = 'QQQ'
+      -- Important: Sum across all portfolios if the user owns QQQ in multiple places
+      -- Or filter by specific portfolio if implied. Here we assume aggregate holding.
+      AND datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_holdings_realized_pnl)
+)
+SELECT 
+    p.portfolio_name,
+    p.portfolio_pnl,
+    s.symbol,
+    s.stock_pnl,
+    (p.portfolio_pnl - s.stock_pnl) AS pnl_difference
+FROM portfolio_stats p
+CROSS JOIN stock_stats s;
+```
 
 ### **User Question:**
 
@@ -329,52 +414,53 @@ Matching Symbol:"""
         Returns:
             Generated SQL query string
         """
-        try:
-            # Get dynamic data from database
-            portfolio_names = self._get_portfolio_names()
-            account_ids = self._get_account_ids()
+        # try:
+        # Get dynamic data from database
+        portfolio_names = self._get_portfolio_names()
+        account_ids = self._get_account_ids()
 
-            # Check for stock mentions and fuzzy match
-            print("  → Checking for stock mentions...")
-            mentioned_terms = self._extract_stock_mentions(query)
+        # Check for stock mentions and fuzzy match
+        print("  → Checking for stock mentions...")
+        mentioned_terms = self._extract_stock_mentions(query)
 
-            matched_symbols = "N/A"
-            if mentioned_terms:
-                print(f"  → Found potential stock mentions: {mentioned_terms}")
-                symbols_dict = self._get_all_symbols_dict()
-                matched_symbols = self._fuzzy_match_symbols(mentioned_terms, symbols_dict)
-                print(f"  → {matched_symbols}")
+        matched_symbols = "N/A"
+        if mentioned_terms:
+            print(f"  → Found potential stock mentions: {mentioned_terms}")
+            symbols_dict = self._get_all_symbols_dict()
+            matched_symbols = self._fuzzy_match_symbols(mentioned_terms, symbols_dict)
+            print(f"  → {matched_symbols}")
 
-            # Invoke the chain with all parameters
-            sql = self.sql_chain.invoke({
-                "schema": schema,
-                "portfolio_names": portfolio_names,
-                "account_ids": account_ids,
-                "matched_symbols": matched_symbols,
-                "query": query
-            })
+        # Invoke the chain with all parameters
+        sql = self.sql_chain.invoke({
+            "schema": schema,
+            "portfolio_names": portfolio_names,
+            "account_ids": account_ids,
+            "matched_symbols": matched_symbols,
+            "query": query
+        })
 
-            # Clean up the response
-            sql = sql.strip()
+        # Clean up the response
+        sql = sql.strip()
 
-            # Remove markdown code blocks if present
-            if sql.startswith("```"):
-                lines = sql.split("\n")
-                sql = "\n".join([line for line in lines if not line.startswith("```") and "sql" not in line.lower()])
+        # Remove markdown code blocks if present
+        if sql.startswith("```"):
+            lines = sql.split("\n")
+            sql = "\n".join([line for line in lines if not line.startswith("```") and "sql" not in line.lower()])
 
-            sql = sql.strip()
+        sql = sql.strip()
+        print(f"  → Generated SQL: {sql}")
+        return sql
 
-            return sql
-
-        except Exception as e:
-            print(f"Error generating SQL: {e}")
-            import traceback
-            traceback.print_exc()
-            return "ERROR: Failed to generate SQL query"
+        # except Exception as e:
+        #     print(f"Error generating SQL: {e}")
+        #     import traceback
+        #     traceback.print_exc()
+        #     return "ERROR: Failed to generate SQL query"
 
     def explain_results(self, query: str, results_df, sql_query: str) -> str:
         """
         Generate a natural language explanation of query results
+        Uses Ollama for explanations regardless of SQL generation model
 
         Args:
             query: Original user question
@@ -401,7 +487,7 @@ Provide a clear, concise explanation of the results in natural language.
 Focus on answering the user's question directly with specific numbers and insights."""
         )
 
-        explain_chain = explain_prompt | self.llm | StrOutputParser()
+        explain_chain = explain_prompt | self.explanation_llm | StrOutputParser()
 
         try:
             explanation = explain_chain.invoke({

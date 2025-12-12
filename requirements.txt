@@ -6,3 +6,5 @@ requests
 chromadb
 pydantic-settings
 psycopg2-binary
+langchain-openai
+openai

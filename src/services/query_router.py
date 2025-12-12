@@ -12,18 +12,21 @@ load_dotenv()
 class QueryRouter:
     """Routes queries to appropriate handlers based on intent classification"""
 
-    def __init__(self, model_name: str = None, ollama_base_url: str = None):
+    def __init__(self, model_name: str = None, sql_executor=None):
         """
-        Initialize the query router
+        Initialize the query router (always uses Ollama)
 
         Args:
             model_name: Name of the Ollama model to use (defaults to config)
-            ollama_base_url: Base URL for Ollama API (defaults to config)
+            sql_executor: Optional SQL executor for checking database contents
         """
-        ollama_config = get_ollama_config()
+        self.sql_executor = sql_executor
+        self._symbols_cache = None
 
+        # Always use Ollama for routing
+        ollama_config = get_ollama_config()
         self.model_name = model_name or ollama_config["model_name"]
-        self.base_url = ollama_base_url or ollama_config["base_url"]
+        self.base_url = ollama_config["base_url"]
         self.temperature = ollama_config["temperature_routing"]
 
         self.llm = Ollama(
@@ -54,9 +57,187 @@ Category:"""
 
         self.routing_chain = self.routing_prompt | self.llm | StrOutputParser()
 
+    def _get_all_symbols(self) -> List[str]:
+        """
+        Fetch all stock symbols from database with caching
+
+        Returns:
+            List of all available stock symbols
+        """
+        if self._symbols_cache is not None:
+            return self._symbols_cache
+
+        if not self.sql_executor:
+            return []
+
+        try:
+            query = """
+            SELECT DISTINCT symbol
+            FROM ai_trading.portfolio_holdings
+            WHERE symbol IS NOT NULL
+            ORDER BY symbol
+            """
+            success, df, _ = self.sql_executor.execute_query(query)
+            if success and df is not None and not df.empty:
+                symbols = df['symbol'].tolist()
+                self._symbols_cache = symbols
+                return symbols
+            return []
+        except Exception as e:
+            print(f"Error fetching symbols for routing: {e}")
+            return []
+
+    def _get_all_portfolios(self) -> List[str]:
+        """
+        Fetch all portfolio names from database with caching
+
+        Returns:
+            List of all available portfolio names
+        """
+        if hasattr(self, '_portfolios_cache') and self._portfolios_cache is not None:
+            return self._portfolios_cache
+
+        if not self.sql_executor:
+            return []
+
+        try:
+            query = """
+            SELECT DISTINCT portfolio_name
+            FROM ai_trading.portfolio_summary
+            WHERE portfolio_name IS NOT NULL
+            ORDER BY portfolio_name
+            """
+            success, df, _ = self.sql_executor.execute_query(query)
+            if success and df is not None and not df.empty:
+                portfolios = df['portfolio_name'].tolist()
+                self._portfolios_cache = portfolios
+                return portfolios
+            return []
+        except Exception as e:
+            print(f"Error fetching portfolios for routing: {e}")
+            return []
+
+    def _extract_stock_symbols(self, query: str) -> List[str]:
+        """
+        Extract potential stock symbols/names from query using LLM
+
+        Args:
+            query: User's question
+
+        Returns:
+            List of potential stock symbols/names mentioned
+        """
+        extraction_prompt = PromptTemplate(
+            input_variables=["query"],
+            template="""Extract any stock names, company names, or stock symbols mentioned in this question.
+Return only the extracted terms, separated by commas. If none found, return "NONE".
+
+Examples:
+- "Compare ABalanced performance against QQQ" -> ABalanced, QQQ
+- "What is the price of AAPL stock?" -> AAPL
+- "Show me MSFT and GOOGL performance" -> MSFT, GOOGL
+- "How is Tesla doing?" -> Tesla
+- "What are my portfolios?" -> NONE
+
+Question: {query}
+
+Extracted terms (comma-separated):"""
+        )
+
+        extraction_chain = extraction_prompt | self.llm | StrOutputParser()
+
+        try:
+            result = extraction_chain.invoke({"query": query})
+            result = result.strip()
+
+            if result.upper() == "NONE" or not result:
+                return []
+
+            # Split by comma and clean
+            terms = [term.strip() for term in result.split(',') if term.strip()]
+            return terms
+        except Exception as e:
+            print(f"Error extracting stock symbols: {e}")
+            return []
+
+    def _check_symbols_in_database(self, mentioned_terms: List[str]) -> Tuple[List[str], List[str], List[str]]:
+        """
+        Check which mentioned terms exist in our database (stocks or portfolios)
+
+        Args:
+            mentioned_terms: List of stock symbols/portfolio names from query
+
+        Returns:
+            Tuple of (terms_found_in_db, terms_not_found, portfolios_found)
+        """
+        if not mentioned_terms:
+            return [], [], []
+
+        all_symbols = self._get_all_symbols()
+        all_portfolios = self._get_all_portfolios()
+
+        # Combine both for comprehensive checking
+        all_data_sources = all_symbols + all_portfolios
+
+        if not all_data_sources:
+            return [], mentioned_terms, []
+
+        found = []
+        not_found = []
+        portfolios_found = []
+
+        # Convert all to uppercase for comparison
+        all_symbols_upper = [s.upper() for s in all_symbols]
+        all_portfolios_upper = [p.upper() for p in all_portfolios]
+        all_data_upper = [s.upper() for s in all_data_sources]
+
+        for term in mentioned_terms:
+            term_upper = term.upper()
+            # Check if it's a portfolio first
+            if term_upper in all_portfolios_upper:
+                found.append(term)
+                portfolios_found.append(term)
+            # Direct match in symbols
+            elif term_upper in all_symbols_upper:
+                found.append(term)
+            else:
+                # Fuzzy match using rapidfuzz
+                best_match = process.extractOne(
+                    term_upper,
+                    all_data_upper,
+                    scorer=fuzz.ratio,
+                    score_cutoff=80  # Slightly lower threshold to catch "ABalanced" -> "A-Balanced"
+                )
+                if best_match:
+                    matched_value = all_data_sources[all_data_upper.index(best_match[0])]
+                    print(f"  → Fuzzy matched '{term}' to '{matched_value}' (score: {best_match[1]})")
+                    found.append(term)
+                    # Check if matched value is a portfolio
+                    if matched_value.upper() in all_portfolios_upper:
+                        portfolios_found.append(term)
+                else:
+                    not_found.append(term)
+
+        return found, not_found, portfolios_found
+
+    def _is_comparison_query(self, query: str) -> bool:
+        """
+        Check if the query is asking for a comparison
+
+        Args:
+            query: User's input query
+
+        Returns:
+            True if query contains comparison keywords
+        """
+        comparison_keywords = ['compare', 'vs', 'versus', 'against', 'difference between',
+                              'better than', 'worse than', 'performance of', 'benchmark']
+        query_lower = query.lower()
+        return any(keyword in query_lower for keyword in comparison_keywords)
+
     def classify_query(self, query: str) -> str:
         """
-        Classify a user query into one of the routing categories
+        Classify a user query into one of the routing categories with database-aware logic
 
         Args:
             query: User's input query
@@ -65,6 +246,40 @@ Category:"""
             Category string: "database", "greeting", or "internet_comparison"
         """
         try:
+            # First, check if query mentions any stocks
+            mentioned_terms = self._extract_stock_symbols(query)
+
+            if mentioned_terms and self.sql_executor:
+                # Check which symbols are in our database
+                found_in_db, not_found, portfolios_found = self._check_symbols_in_database(mentioned_terms)
+
+                print(f"  → Stock symbols extracted: {mentioned_terms}")
+                print(f"  → Found in database: {found_in_db}")
+                print(f"  → Portfolios found: {portfolios_found}")
+                print(f"  → Not found in database: {not_found}")
+
+                # Smart routing based on database availability and query type
+                if found_in_db and not not_found:
+                    # All mentioned stocks/portfolios are in database -> route to database
+                    print(f"  → All symbols found in database, routing to 'database'")
+                    return "database"
+                elif portfolios_found and not_found:
+                    # Portfolio comparison with external stock (e.g., "Compare ABalanced vs QQQ")
+                    # Route to database - the database handler can handle portfolio data
+                    # and the user can fetch external stock data separately if needed
+                    print(f"  → Portfolio comparison detected (portfolio in DB, external stock mentioned)")
+                    print(f"  → Routing to 'database' - handler will work with available portfolio data")
+                    return "database"
+                elif found_in_db and not_found and not portfolios_found:
+                    # Mixed stocks: some in DB, some not, no portfolios -> needs internet comparison
+                    print(f"  → Mixed stocks (some in DB, some not), routing to 'internet_comparison'")
+                    return "internet_comparison"
+                elif not_found and not found_in_db:
+                    # All mentioned stocks not in database -> needs internet
+                    print(f"  → No stocks found in database, routing to 'internet_comparison'")
+                    return "internet_comparison"
+
+            # Fall back to LLM classification for non-stock queries
             response = self.routing_chain.invoke({"query": query})
             category = response.strip().lower()
 
