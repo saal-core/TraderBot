@@ -24,6 +24,10 @@ ARABIC_FINANCIAL_GLOSSARY = """
 - Default Index: المؤشر الافتراضي
 - Net Liquidity: صافي السيولة
 - Market Index: مؤشر السوق
+- Comparison: المقارنة
+- Outperform: يتفوق على
+- Underperform: أداء أقل من
+- Benchmark Return: عائد المعيار المرجعي
 """
 
 # Vanna Explanation Prompt
@@ -73,11 +77,11 @@ OTHER_HANDLER_PROMPT = (
 
 # Query Classification System Prompt
 CLASSIFICATION_SYSTEM_PROMPT = (
-    "You are an expert query classifier. Your job is to classify the user's query into one of three categories: "
-    "portfolio, general, or other. You must respond with only the single category name."
+    "You are an expert query classifier. Your job is to classify the user's query into one of four categories: "
+    "portfolio, general, comparison, or other. You must respond with only the single category name."
 )
 
-# Query Classification User Prompt Template
+# Query Classification User Prompt Template (Updated with comparison category)
 CLASSIFICATION_USER_PROMPT = """Here are the rules and examples to follow.
 
 ---
@@ -91,12 +95,25 @@ CLASSIFICATION_USER_PROMPT = """Here are the rules and examples to follow.
      - Any Questions related for trading related actions like 'Can you trade bitcoin for me?' etc., should be categorized as **other**
    This includes **performance metrics** (like returns, profit, value) and **descriptive details** (like default index, start date, description, cost model
    If any questions directly related to stock like 'bottom 15 loss stocks', 'top 15 profit stocks' should be labelled as portfolio**
+
 2. **general**: For questions requiring a live web search for public, real-time data like current stock prices or latest news.
     **Includes**
     - If I had invested AED 10,000 in NVIDIA in January, how much would it be worth now
     - CAGR calculation
     - Returns Calculation
-3. **other**: This category is for any query that has **NO specific financial data request**. Respond to these queries as a friendly bot appropriately.
+    - Current stock prices
+    - Latest market news
+
+3. **comparison**: For questions that COMPARE local portfolio data WITH external market data or benchmarks:
+    **Includes**
+    - "Compare my portfolio to S&P 500"
+    - "How does my portfolio perform against the market?"
+    - "Is my portfolio outperforming NASDAQ?"
+    - "Compare my returns vs the benchmark"
+    - "How do my holdings compare to current market prices?"
+    **Key indicators**: words like "compare", "vs", "versus", "against", "benchmark", "outperform", "underperform" combined with portfolio references AND market/index references
+
+4. **other**: This category is for any query that has **NO specific financial data request**. Respond to these queries as a friendly bot appropriately.
     - **Includes:**
         - **Small Talk:** "Hi", "Tell me a joke", "How are you?"
         - **Identity:** "Who are you?", "Can you act as my financial advisor?"
@@ -107,7 +124,8 @@ CLASSIFICATION_USER_PROMPT = """Here are the rules and examples to follow.
 ---
 **TIE-BREAKER LOGIC (CRITICAL)**
 - If a query mixes conversation with a financial request, classify it by the financial request.
-- **When uncertain, you MUST prefer `portfolio`** if the question mentions portfolio-related keywords.
+- If a query mentions BOTH local portfolio data AND external market/benchmark data with comparison intent → **comparison**
+- **When uncertain, you MUST prefer `portfolio`** if the question mentions portfolio-related keywords without external benchmark.
 
 ---
 **EXAMPLES**
@@ -120,6 +138,12 @@ Category: general
 User: "What is my total portfolio value?"
 Category: portfolio
 
+User: "Compare my portfolio to S&P 500"
+Category: comparison
+
+User: "How does my portfolio perform against the market?"
+Category: comparison
+
 User: "Hi"
 Category: other
 
@@ -131,6 +155,9 @@ Category: portfolio
 
 User: "list all my portfolios"
 Category: portfolio
+
+User: "Is my portfolio outperforming NASDAQ this year?"
+Category: comparison
 
 ---
 **YOUR TASK**
@@ -167,3 +194,119 @@ CUSTOM_ERROR_MESSAGE = (
     "Sorry, I am currently unable to retrieve that information. "
     "Please try rephrasing your question or ask about a different topic."
 )
+
+# ============================================================================
+# COMPARISON HANDLER PROMPTS
+# ============================================================================
+
+# Comparison Planning Prompt - extracts what to compare
+COMPARISON_PLAN_PROMPT = """You are an expert at analyzing financial comparison queries.
+Given a user's question, extract what local portfolio data and what external market data need to be compared.
+
+User Question: {query}
+
+Analyze the question and respond with a JSON object containing:
+{{
+    "comparison_type": "portfolio_vs_index" | "stock_vs_market" | "portfolio_vs_stock" | "holdings_vs_prices" | "general_comparison",
+    "local_entity": "description of what to query from local database (portfolio name, stock symbol, etc.)",
+    "local_query_hint": "natural language query to send to database handler",
+    "external_entity": "description of what to fetch from internet (index name, stock symbol, etc.)",
+    "external_query_hint": "natural language query to send to internet handler",
+    "comparison_metrics": ["list of metrics to compare, e.g., 'YTD return', 'current value', 'profit/loss'"],
+    "time_period": "time period for comparison if mentioned (e.g., 'YTD', 'MTD', 'all-time', 'today')"
+}}
+
+Important:
+- For portfolio vs index comparisons (e.g., "compare my portfolio to S&P 500"), the local_query_hint should ask for portfolio performance metrics
+- For stock holdings vs market prices, local_query_hint should ask for holdings data, external should ask for current prices
+- Be specific in your hints to get the right data
+- If a specific portfolio name is mentioned (e.g., "A-Balanced"), include it in the local_query_hint
+
+Respond with ONLY the JSON object, no additional text."""
+
+
+# Comparison Explanation Prompt - generates the final comparison narrative
+COMPARISON_EXPLANATION_PROMPT = """You are an experienced equity fund manager explaining financial comparisons to non-financial stakeholders.
+
+User's Original Question: {query}
+
+Comparison Type: {comparison_type}
+
+Local Portfolio Data:
+{local_data}
+
+External Market Data:
+{external_data}
+
+Based on this data, provide a clear, concise comparison that:
+1. Directly answers the user's question
+2. Highlights key differences and similarities
+3. Provides specific numbers and percentages where available
+4. Explains what the comparison means in simple terms
+5. If one dataset is missing or incomplete, acknowledge it and work with available data
+6. Draw meaningful conclusions about performance
+
+Guidelines:
+- Be factual and precise
+- Use bullet points for multiple comparison points
+- If the data doesn't allow for exact comparison, explain why and provide the best possible analysis
+- Respond in the same language as the user's question (English or Arabic)
+- Do not include citations or source references in your explanation
+- Highlight whether the portfolio is outperforming or underperforming the benchmark
+
+Comparison Analysis:"""
+
+
+# Fallback prompt when comparison data is incomplete
+PARTIAL_COMPARISON_PROMPT = """You are a helpful financial assistant. The user asked for a comparison but we could only retrieve partial data.
+
+User's Question: {query}
+
+Available Data:
+{available_data}
+
+Missing Data:
+{missing_data}
+
+Provide a helpful response that:
+1. Explains what data we were able to retrieve
+2. Acknowledges what data is missing
+3. Provides analysis based on available data
+4. Suggests how the user might rephrase their question for better results
+
+Keep your response helpful and constructive.
+
+Response:"""
+
+
+# Comparison metrics extraction prompt
+COMPARISON_METRICS_PROMPT = """Extract the key comparison metrics from the following data.
+
+Portfolio Data:
+{portfolio_data}
+
+Market Data:
+{market_data}
+
+Extract and return a JSON object with:
+{{
+    "portfolio_metrics": {{
+        "ytd_return": <number or null>,
+        "total_return": <number or null>,
+        "total_value": <number or null>,
+        "profit_loss": <number or null>
+    }},
+    "market_metrics": {{
+        "ytd_return": <number or null>,
+        "total_return": <number or null>,
+        "current_value": <number or null>
+    }},
+    "comparison": {{
+        "difference": <number or null>,
+        "outperforming": <boolean or null>,
+        "comparison_period": "<string>"
+    }}
+}}
+
+If a metric cannot be determined, use null.
+Return ONLY the JSON object."""

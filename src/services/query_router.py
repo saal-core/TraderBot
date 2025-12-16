@@ -1,14 +1,20 @@
+"""
+Query Router - Routes queries to appropriate handlers based on intent classification.
+Includes detection for comparison queries that require both local and external data.
+"""
 from typing import Dict, List, Tuple, Optional
 from langchain_community.llms import Ollama
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from src.config.settings import get_ollama_config
 import os
+import re
 import time
 from rapidfuzz import fuzz, process
 
 from dotenv import load_dotenv
 load_dotenv()
+
 
 class QueryRouter:
     """Routes queries to appropriate handlers based on intent classification"""
@@ -23,6 +29,7 @@ class QueryRouter:
         """
         self.sql_executor = sql_executor
         self._symbols_cache = None
+        self._portfolios_cache = None
 
         # Always use Ollama for routing
         ollama_config = get_ollama_config()
@@ -36,7 +43,7 @@ class QueryRouter:
             temperature=self.temperature
         )
 
-        # Define routing prompt template
+        # Define routing prompt template with comparison category
         self.routing_prompt = PromptTemplate(
             input_variables=["query"],
             template="""You are a query classifier. Classify the following user query into ONE of these categories:
@@ -48,27 +55,39 @@ Categories:
    - Portfolio statistics, returns, values, metrics
    - Rankings, comparisons, aggregations of local data (e.g., "highest profit", "best performing", "top 10 stocks")
    - Current state of holdings (e.g., "which stock has the highest value right now")
-   - Comparisons between portfolios or stocks in our database
    Examples: "show me all portfolios", "which stock has the highest profit", "what are my holdings", "top 5 stocks by return"
 
 2. "greeting" - Greetings, chitchat, hello, how are you, goodbye, thank you, etc.
 
-3. "internet_data" - Questions that require fetching REAL-TIME data from the internet:
+3. "internet_data" - Questions that require fetching REAL-TIME data from the internet ONLY:
    - Current stock prices, cryptocurrency prices, forex rates
    - Latest financial news about companies or markets
    - Market indices performance (S&P 500, NASDAQ, Dow Jones, etc.)
    - Market movers: top gainers, top losers, trending stocks
    - Real-time market data not in our database
-   - Commodity prices, economic indicators
-   - Time-specific market queries (today, this week, this month)
-   Examples: "What's the current price of Tesla?", "Give me the latest news on Apple", "What's the S&P 500 performance today?", "Who are the top gainers in the Nasdaq this week?", "What's Bitcoin's price?"
+   Examples: "What's the current price of Tesla?", "Give me the latest news on Apple", "What's Bitcoin's price?"
+
+4. "comparison" - Questions that COMPARE local portfolio/holdings data WITH external market data:
+   - Portfolio performance vs market indices (S&P 500, NASDAQ, etc.)
+   - Portfolio returns vs benchmark returns
+   - Local holdings vs current market prices
+   - Any comparison between "my/our portfolio/holdings" and external data
+   Examples: 
+   - "Compare my portfolio to S&P 500"
+   - "How does my portfolio perform against the market?"
+   - "Is my portfolio outperforming NASDAQ?"
+   - "Compare A-Balanced portfolio returns vs S&P 500 YTD"
+   - "How do my holdings compare to current market prices?"
+   - "What's the difference between my returns and the benchmark?"
 
 Rules:
-- Return ONLY the category name: database, greeting, or internet_data
+- Return ONLY the category name: database, greeting, internet_data, or comparison
 - Do not include any explanation or additional text
-- Questions about local data analysis, rankings, or comparisons within our database = "database"
-- Questions requiring real-time internet data = "internet_data"
-- If unsure, default to "database" for data-related queries
+- If query mentions BOTH local data (portfolio, holdings, my stocks) AND external benchmarks/indices → "comparison"
+- Questions about local data analysis only = "database"
+- Questions requiring ONLY real-time internet data = "internet_data"
+- If query uses words like "vs", "against", "compared to", "benchmark", "outperform" with portfolio data → "comparison"
+- If unsure between database and comparison, prefer "comparison" if external reference is mentioned
 
 User Query: {query}
 
@@ -114,7 +133,7 @@ Category:"""
         Returns:
             List of all available portfolio names
         """
-        if hasattr(self, '_portfolios_cache') and self._portfolios_cache is not None:
+        if self._portfolios_cache is not None:
             return self._portfolios_cache
 
         if not self.sql_executor:
@@ -234,7 +253,7 @@ Extracted terms (comma-separated):"""
                     term_upper,
                     all_data_upper,
                     scorer=fuzz.ratio,
-                    score_cutoff=80  # Slightly lower threshold to catch "ABalanced" -> "A-Balanced"
+                    score_cutoff=80
                 )
                 if best_match:
                     matched_value = all_data_sources[all_data_upper.index(best_match[0])]
@@ -250,18 +269,68 @@ Extracted terms (comma-separated):"""
 
     def _is_comparison_query(self, query: str) -> bool:
         """
-        Check if the query is asking for a comparison
+        Quick heuristic check if the query is asking for a comparison
+        between local data and external data.
 
         Args:
             query: User's input query
 
         Returns:
-            True if query contains comparison keywords
+            True if query appears to be a comparison between local and external data
         """
-        comparison_keywords = ['compare', 'vs', 'versus', 'against', 'difference between',
-                              'better than', 'worse than', 'performance of', 'benchmark']
         query_lower = query.lower()
-        return any(keyword in query_lower for keyword in comparison_keywords)
+
+        # Keywords that indicate comparison
+        comparison_keywords = [
+            'compare', 'vs', 'versus', 'against', 'benchmark',
+            'outperform', 'underperform', 'beat', 'relative to',
+            'difference between', 'better than', 'worse than',
+            'compared to', 'stack up', 'measure against'
+        ]
+
+        # External/market reference keywords
+        external_keywords = [
+            's&p', 'sp500', 's&p 500', 'nasdaq', 'dow jones', 'dow',
+            'market', 'index', 'benchmark', 'russell', 'nyse',
+            'market average', 'market return', 'market performance'
+        ]
+
+        # Local data reference keywords
+        local_keywords = [
+            'my portfolio', 'our portfolio', 'my holdings', 'our holdings',
+            'my stocks', 'our stocks', 'my returns', 'our returns',
+            'portfolio', 'holdings'
+        ]
+
+        # Check for comparison keyword
+        has_comparison = any(kw in query_lower for kw in comparison_keywords)
+
+        # Check for external reference
+        has_external = any(kw in query_lower for kw in external_keywords)
+
+        # Check for local reference
+        has_local = any(kw in query_lower for kw in local_keywords)
+
+        # It's a comparison if it has comparison keyword AND mentions both local and external
+        # OR if it has comparison patterns like "portfolio vs S&P"
+        if has_comparison and has_external and has_local:
+            return True
+
+        # Check for specific comparison patterns
+        comparison_patterns = [
+            r'portfolio.*(?:vs|versus|against|to).*(?:s&p|nasdaq|dow|index|market|benchmark)',
+            r'(?:my|our).*(?:vs|versus|against|compared).*(?:s&p|nasdaq|dow|index|market)',
+            r'(?:compare|comparing).*portfolio.*(?:to|with|against)',
+            r'(?:how|what).*portfolio.*(?:compare|perform).*(?:against|vs|versus)',
+            r'(?:outperform|underperform|beat).*(?:market|index|benchmark)',
+            r'(?:returns?|performance).*(?:vs|versus|against).*(?:s&p|nasdaq|market)',
+        ]
+
+        for pattern in comparison_patterns:
+            if re.search(pattern, query_lower):
+                return True
+
+        return False
 
     def classify_query(self, query: str) -> str:
         """
@@ -271,10 +340,17 @@ Extracted terms (comma-separated):"""
             query: User's input query
 
         Returns:
-            Category string: "database", "greeting", or "internet_data"
+            Category string: "database", "greeting", "internet_data", or "comparison"
         """
         try:
-            # Check for database-related keywords that indicate local data queries
+            query_lower = query.lower()
+
+            # STEP 1: Quick check for comparison queries (highest priority for mixed queries)
+            if self._is_comparison_query(query):
+                print(f"  → Detected comparison query pattern, routing to 'comparison'")
+                return "comparison"
+
+            # STEP 2: Check for database-related keywords that indicate local data queries
             database_keywords = [
                 'holding', 'holdings', 'portfolio', 'position', 'positions',
                 'unrealized', 'profit', 'loss', 'gain', 'return',
@@ -283,10 +359,9 @@ Extracted terms (comma-separated):"""
                 'total value', 'market value', 'cost basis'
             ]
 
-            query_lower = query.lower()
             has_database_keywords = any(keyword in query_lower for keyword in database_keywords)
 
-            # Check for real-time internet data keywords
+            # STEP 3: Check for real-time internet data keywords
             internet_data_keywords = [
                 'current price', 'latest news', 'news on', 'price of',
                 'performance today', 'today\'s performance', 'real-time',
@@ -294,34 +369,38 @@ Extracted terms (comma-separated):"""
                 'bitcoin', 'crypto', 'cryptocurrency', 'btc', 'eth',
                 's&p 500 performance', 'nasdaq performance', 'dow jones performance',
                 'market update', 'latest on', 'what\'s the price',
-                # Market movers and trends
                 'top gainers', 'top losers', 'biggest movers', 'most active',
                 'trending stocks', 'market leaders', 'market laggards',
                 'gainers in', 'losers in', 'movers in',
-                # Time-based market queries
                 'this week', 'this month', 'today', 'yesterday',
                 'last week', 'last month', 'recent',
-                # Market indices and sectors
                 'nasdaq', 'dow jones', 's&p 500', 'sp500', 's&p',
                 'russell', 'market index', 'sector performance'
             ]
             has_internet_data_keywords = any(keyword in query_lower for keyword in internet_data_keywords)
 
-            # If query explicitly asks for real-time/current data, route to internet_data
-            if has_internet_data_keywords:
+            # STEP 4: If query has BOTH local and internet keywords, it might be comparison
+            if has_database_keywords and has_internet_data_keywords:
+                # Check if there's any comparison intent
+                comparison_hints = ['vs', 'versus', 'against', 'compare', 'compared', 'benchmark', 'outperform']
+                if any(hint in query_lower for hint in comparison_hints):
+                    print(f"  → Query has both local and external keywords with comparison intent, routing to 'comparison'")
+                    return "comparison"
+
+            # STEP 5: If query explicitly asks for real-time/current data only, route to internet_data
+            if has_internet_data_keywords and not has_database_keywords:
                 print(f"  → Query requires real-time internet data, routing to 'internet_data'")
                 return "internet_data"
 
-            # If it has database keywords and NO internet data keywords, route to database
+            # STEP 6: If it has database keywords and NO internet data keywords, route to database
             if has_database_keywords and not has_internet_data_keywords:
                 print(f"  → Query contains database keywords, routing to 'database'")
                 return "database"
 
-            # First, check if query mentions any stocks
+            # STEP 7: Check for stock symbol mentions
             mentioned_terms = self._extract_stock_symbols(query)
 
             if mentioned_terms and self.sql_executor:
-                # Check which symbols are in our database
                 found_in_db, not_found, portfolios_found = self._check_symbols_in_database(mentioned_terms)
 
                 print(f"  → Stock symbols extracted: {mentioned_terms}")
@@ -331,32 +410,23 @@ Extracted terms (comma-separated):"""
 
                 # Smart routing based on database availability and query type
                 if found_in_db and not not_found:
-                    # All mentioned stocks/portfolios are in database -> route to database
+                    # All mentioned stocks/portfolios are in database
                     print(f"  → All symbols found in database, routing to 'database'")
                     return "database"
                 elif portfolios_found and not_found:
-                    # Portfolio comparison with external stock (e.g., "Compare ABalanced vs QQQ")
-                    # Route to database - the database handler can handle portfolio data
-                    # and the user can fetch external stock data separately if needed
-                    print(f"  → Portfolio comparison detected (portfolio in DB, external stock mentioned)")
-                    print(f"  → Routing to 'database' - handler will work with available portfolio data")
+                    # Portfolio + external reference - likely a comparison
+                    # Check for comparison keywords
+                    if any(kw in query_lower for kw in ['vs', 'versus', 'against', 'compare', 'benchmark']):
+                        print(f"  → Portfolio with external reference detected, routing to 'comparison'")
+                        return "comparison"
+                    print(f"  → Portfolio comparison detected, routing to 'database'")
                     return "database"
-                elif found_in_db and not_found and not portfolios_found:
-                    # Mixed stocks: some in DB, some not, no portfolios
-                    # If it's asking for current/live data, route to internet_data
-                    # Otherwise route to database for what we have
-                    if has_internet_data_keywords:
-                        print(f"  → Real-time data requested, routing to 'internet_data'")
-                        return "internet_data"
-                    else:
-                        print(f"  → Mixed stocks, routing to 'database' for available data")
-                        return "database"
                 elif not_found and not found_in_db:
-                    # All mentioned stocks not in database -> needs internet
+                    # All mentioned stocks not in database
                     print(f"  → No stocks found in database, routing to 'internet_data'")
                     return "internet_data"
 
-            # Fall back to LLM classification for non-stock queries
+            # STEP 8: Fall back to LLM classification
             start_time = time.time()
             print(f"⏱️  Starting: Query Classification (LLM)...")
 
@@ -368,7 +438,9 @@ Extracted terms (comma-separated):"""
             category = response.strip().lower()
 
             # Normalize the response
-            if "database" in category:
+            if "comparison" in category:
+                return "comparison"
+            elif "database" in category:
                 return "database"
             elif "greeting" in category or "chitchat" in category:
                 return "greeting"

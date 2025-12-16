@@ -1,3 +1,8 @@
+"""
+TraderBot Main Application
+A natural language interface for querying financial databases with 
+comparison capabilities between local portfolio data and external market data.
+"""
 import streamlit as st
 import pandas as pd
 from typing import List, Dict
@@ -5,7 +10,6 @@ import sys
 import os
 import json
 from datetime import datetime
-
 
 # Import configuration and custom modules
 from src.config.settings import get_app_config, get_ollama_config, get_postgres_config
@@ -15,6 +19,8 @@ from src.services.database_handler import DatabaseQueryHandler
 from src.services.greating_handler import GreetingHandler
 from src.services.chat_memory import ChatMemory
 from src.services.internet_data_handler import InternetDataHandler
+from src.services.comparison_handler import ComparisonHandler
+
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -63,6 +69,13 @@ st.markdown("""
         color: #dc3545;
         font-weight: bold;
     }
+    .comparison-box {
+        background-color: #e8f4f8;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        border-left: 4px solid #1f77b4;
+        margin: 1rem 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -87,15 +100,22 @@ def initialize_session_state():
     if "internet_data_handler" not in st.session_state:
         st.session_state.internet_data_handler = None
 
+    if "comparison_handler" not in st.session_state:
+        st.session_state.comparison_handler = None
+
     if "sql_executor" not in st.session_state:
         st.session_state.sql_executor = None
 
     if "chat_memory" not in st.session_state:
-        # Initialize chat memory with 5 Q&A pairs
         st.session_state.chat_memory = ChatMemory(max_pairs=5)
 
     if "query_stats" not in st.session_state:
-        st.session_state.query_stats = {"database": 0, "greeting": 0, "internet_data": 0}
+        st.session_state.query_stats = {
+            "database": 0, 
+            "greeting": 0, 
+            "internet_data": 0,
+            "comparison": 0
+        }
 
 
 def export_chat_history(format_type: str = "json") -> str:
@@ -109,7 +129,6 @@ def export_chat_history(format_type: str = "json") -> str:
         Formatted string of chat history
     """
     if format_type == "json":
-        # Create a clean export without dataframes
         export_data = []
         for msg in st.session_state.messages:
             clean_msg = {
@@ -119,6 +138,8 @@ def export_chat_history(format_type: str = "json") -> str:
             }
             if "sql_query" in msg and msg["sql_query"]:
                 clean_msg["sql_query"] = msg["sql_query"]
+            if "query_type" in msg:
+                clean_msg["query_type"] = msg["query_type"]
             export_data.append(clean_msg)
         return json.dumps(export_data, indent=2)
     else:  # txt format
@@ -131,6 +152,8 @@ def export_chat_history(format_type: str = "json") -> str:
             txt_lines.append(f"{msg['content']}\n")
             if "sql_query" in msg and msg["sql_query"]:
                 txt_lines.append(f"\nSQL Query:\n{msg['sql_query']}\n")
+            if "query_type" in msg:
+                txt_lines.append(f"\nQuery Type: {msg['query_type']}\n")
             txt_lines.append("\n" + "=" * 80 + "\n\n")
 
         return "".join(txt_lines)
@@ -143,13 +166,12 @@ def get_query_statistics() -> Dict[str, int]:
     Returns:
         Dictionary with query type counts
     """
-    stats = {"database": 0, "greeting": 0, "internet_data": 0, "total": 0}
+    stats = {"database": 0, "greeting": 0, "internet_data": 0, "comparison": 0, "total": 0}
 
     for msg in st.session_state.messages:
         if msg["role"] == "user":
             stats["total"] += 1
 
-    # Return combined stats
     stats.update(st.session_state.query_stats)
     return stats
 
@@ -158,8 +180,6 @@ def initialize_handlers():
     """Initialize all handlers and database connection"""
     try:
         with st.spinner("Initializing chatbot components..."):
-
-
             ollama_config = get_ollama_config()
 
             # Initialize PostgreSQL executor
@@ -173,11 +193,19 @@ def initialize_handlers():
 
             st.success(message)
 
-            # Initialize LLM handlers (pass sql_executor to both router and db_handler for dynamic data)
+            # Initialize handlers
             st.session_state.router = QueryRouter(sql_executor=st.session_state.sql_executor)
             st.session_state.db_handler = DatabaseQueryHandler(sql_executor=st.session_state.sql_executor)
             st.session_state.greeting_handler = GreetingHandler()
             st.session_state.internet_data_handler = InternetDataHandler()
+            
+            # Initialize comparison handler with existing handlers
+            st.session_state.comparison_handler = ComparisonHandler(
+                db_handler=st.session_state.db_handler,
+                internet_handler=st.session_state.internet_data_handler,
+                sql_executor=st.session_state.sql_executor,
+                use_openai=True  # Use OpenAI for better comparison planning
+            )
 
             st.session_state.db_initialized = True
             st.success("✅ All components initialized successfully!")
@@ -211,6 +239,12 @@ def display_chat_history():
             if "results_df" in message and message["results_df"] is not None:
                 with st.expander("📊 View Results Table"):
                     st.dataframe(message["results_df"], use_container_width=True)
+
+            # Display comparison details if present
+            if "comparison_plan" in message and message["comparison_plan"]:
+                with st.expander("🔄 View Comparison Details"):
+                    plan = message["comparison_plan"]
+                    st.json(plan)
 
 
 def process_database_query(user_query: str) -> Dict:
@@ -274,9 +308,7 @@ def process_greeting(user_query: str) -> Dict:
 
     try:
         with st.spinner("💬 Generating response..."):
-            # Use chat memory to get context (automatically handles last N pairs)
             chat_history = st.session_state.messages
-
             greeting_response = st.session_state.greeting_handler.respond(user_query, chat_history)
             response["content"] = f"{greeting_response}"
 
@@ -287,7 +319,7 @@ def process_greeting(user_query: str) -> Dict:
 
 
 def process_internet_data(user_query: str) -> Dict:
-    """Process an internet data query using Perplexity API to fetch real-time financial information"""
+    """Process an internet data query using Perplexity API"""
     response = {
         "content": "",
         "sql_query": None,
@@ -296,15 +328,62 @@ def process_internet_data(user_query: str) -> Dict:
 
     try:
         with st.spinner("🌐 Fetching real-time data from the internet..."):
-            # Get chat history for context
             chat_history = st.session_state.messages
-
-            # Use Perplexity API to fetch real-time financial data
             data_response = st.session_state.internet_data_handler.fetch_data(user_query, chat_history)
             response["content"] = f"🌐 {data_response}"
 
     except Exception as e:
         response["content"] = f"❌ Error: {str(e)}"
+
+    return response
+
+
+def process_comparison_query(user_query: str) -> Dict:
+    """
+    Process a comparison query that requires both local and external data.
+    
+    Args:
+        user_query: User's comparison question
+        
+    Returns:
+        Dictionary with comparison results
+    """
+    response = {
+        "content": "",
+        "sql_query": None,
+        "results_df": None,
+        "comparison_plan": None,
+        "local_data": None,
+        "external_data": None
+    }
+
+    try:
+        with st.spinner("🔄 Processing comparison query..."):
+            # Show sub-steps
+            status_container = st.empty()
+            
+            status_container.info("📋 Step 1/4: Planning comparison...")
+            
+            chat_history = st.session_state.messages
+            
+            # Process comparison through the handler
+            comparison_result = st.session_state.comparison_handler.process(
+                user_query, 
+                chat_history
+            )
+            
+            # Extract results
+            response["content"] = comparison_result.get("content", "")
+            response["sql_query"] = comparison_result.get("sql_query")
+            response["results_df"] = comparison_result.get("results_df")
+            response["comparison_plan"] = comparison_result.get("comparison_plan")
+            response["local_data"] = comparison_result.get("local_data")
+            response["external_data"] = comparison_result.get("external_data")
+            
+            status_container.empty()
+
+    except Exception as e:
+        response["content"] = f"❌ Error processing comparison: {str(e)}"
 
     return response
 
@@ -369,6 +448,18 @@ def main():
                 if st.button(query, key=f"db_{query}", use_container_width=True):
                     st.session_state.example_query = query
 
+        # Comparison queries (NEW)
+        with st.expander("🔄 Comparison Queries", expanded=False):
+            comparison_queries = [
+                "Compare my portfolio to S&P 500",
+                "How does my portfolio perform against NASDAQ?",
+                "Compare A-Balanced returns vs market benchmark",
+                "Is my portfolio outperforming the market this year?",
+            ]
+            for query in comparison_queries:
+                if st.button(query, key=f"comp_{query}", use_container_width=True):
+                    st.session_state.example_query = query
+
         # Internet data queries
         with st.expander("🌐 Real-Time Data", expanded=False):
             internet_queries = [
@@ -412,12 +503,12 @@ def main():
             stats = get_query_statistics()
             st.metric("Total Queries", stats["total"])
 
-            col1, col2, col3 = st.columns(3)
+            col1, col2 = st.columns(2)
             with col1:
                 st.metric("💾 DB", stats["database"])
-            with col2:
                 st.metric("🌐 Web", stats["internet_data"])
-            with col3:
+            with col2:
+                st.metric("🔄 Compare", stats["comparison"])
                 st.metric("💬 Chat", stats["greeting"])
 
             # Chat memory info
@@ -457,7 +548,12 @@ def main():
 
         if st.button("🗑️ Clear Chat History", use_container_width=True):
             st.session_state.messages = []
-            st.session_state.query_stats = {"database": 0, "greeting": 0, "internet_data": 0}
+            st.session_state.query_stats = {
+                "database": 0, 
+                "greeting": 0, 
+                "internet_data": 0,
+                "comparison": 0
+            }
             st.rerun()
 
     # Check if initialized
@@ -475,6 +571,16 @@ def main():
            - `POSTGRES_PASSWORD`
         3. Make sure Ollama is running with the specified model
         4. Click 'Initialize/Reinitialize' in the sidebar
+        """)
+        
+        st.markdown("### 🆕 New Feature: Comparison Queries")
+        st.markdown("""
+        You can now compare your local portfolio data with external market data!
+        
+        **Example queries:**
+        - "Compare my portfolio to S&P 500"
+        - "How does my portfolio perform against the market?"
+        - "Is my portfolio outperforming NASDAQ this year?"
         """)
         return
 
@@ -510,7 +616,15 @@ def main():
         if query_type in st.session_state.query_stats:
             st.session_state.query_stats[query_type] += 1
 
-        st.info(f"📌 Query Type: **{query_type}**")
+        # Show query type with appropriate icon
+        type_icons = {
+            "database": "💾",
+            "greeting": "💬",
+            "internet_data": "🌐",
+            "comparison": "🔄"
+        }
+        icon = type_icons.get(query_type, "❓")
+        st.info(f"{icon} Query Type: **{query_type}**")
 
         # Process based on type
         with st.chat_message("assistant"):
@@ -520,6 +634,8 @@ def main():
                 response = process_greeting(user_input)
             elif query_type == "internet_data":
                 response = process_internet_data(user_input)
+            elif query_type == "comparison":
+                response = process_comparison_query(user_input)
             else:
                 response = {
                     "content": "❌ Sorry, I couldn't understand your question.",
@@ -531,26 +647,39 @@ def main():
             st.markdown(response["content"])
 
             # Display SQL query if present
-            if response["sql_query"]:
+            if response.get("sql_query"):
                 with st.expander("🔍 View SQL Query"):
                     st.code(response["sql_query"], language="sql")
 
             # Display results dataframe if present
-            if response["results_df"] is not None:
+            if response.get("results_df") is not None:
                 with st.expander("📊 View Results Table"):
                     st.dataframe(response["results_df"], use_container_width=True)
 
+            # Display comparison details if present
+            if response.get("comparison_plan"):
+                with st.expander("🔄 View Comparison Details"):
+                    st.json(response["comparison_plan"])
+
         # Add assistant response to history with timestamp
         assistant_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        st.session_state.messages.append({
+        message_entry = {
             "role": "assistant",
             "content": response["content"],
             "sql_query": response.get("sql_query"),
             "results_df": response.get("results_df"),
-            "timestamp": assistant_timestamp
-        })
+            "timestamp": assistant_timestamp,
+            "query_type": query_type
+        }
+        
+        # Add comparison-specific data if present
+        if query_type == "comparison":
+            message_entry["comparison_plan"] = response.get("comparison_plan")
+            message_entry["local_data"] = response.get("local_data")
+            message_entry["external_data"] = response.get("external_data")
+        
+        st.session_state.messages.append(message_entry)
 
 
 if __name__ == "__main__":
-    #test git
     main()
