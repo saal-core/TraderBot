@@ -48,20 +48,26 @@ Categories:
    - Portfolio statistics, returns, values, metrics
    - Rankings, comparisons, aggregations of local data (e.g., "highest profit", "best performing", "top 10 stocks")
    - Current state of holdings (e.g., "which stock has the highest value right now")
+   - Comparisons between portfolios or stocks in our database
    Examples: "show me all portfolios", "which stock has the highest profit", "what are my holdings", "top 5 stocks by return"
 
 2. "greeting" - Greetings, chitchat, hello, how are you, goodbye, thank you, etc.
 
-3. "internet_comparison" - Questions that EXPLICITLY require fetching EXTERNAL internet data and comparing with local data:
-   - Must mention external entities NOT in our database (like market indices: SPY, S&P 500, NASDAQ,)
-   - Must involve comparison between our data and external/market data
-   Examples: "compare our portfolio with QQQ", "how do we perform vs the market", "benchmark against S&P 500"
+3. "internet_data" - Questions that require fetching REAL-TIME data from the internet:
+   - Current stock prices, cryptocurrency prices, forex rates
+   - Latest financial news about companies or markets
+   - Market indices performance (S&P 500, NASDAQ, Dow Jones, etc.)
+   - Market movers: top gainers, top losers, trending stocks
+   - Real-time market data not in our database
+   - Commodity prices, economic indicators
+   - Time-specific market queries (today, this week, this month)
+   Examples: "What's the current price of Tesla?", "Give me the latest news on Apple", "What's the S&P 500 performance today?", "Who are the top gainers in the Nasdaq this week?", "What's Bitcoin's price?"
 
 Rules:
-- Return ONLY the category name: database, greeting, or internet_comparison
+- Return ONLY the category name: database, greeting, or internet_data
 - Do not include any explanation or additional text
 - Questions about local data analysis, rankings, or comparisons within our database = "database"
-- Only use "internet_comparison" when external data is EXPLICITLY needed
+- Questions requiring real-time internet data = "internet_data"
 - If unsure, default to "database" for data-related queries
 
 User Query: {query}
@@ -265,7 +271,7 @@ Extracted terms (comma-separated):"""
             query: User's input query
 
         Returns:
-            Category string: "database", "greeting", or "internet_comparison"
+            Category string: "database", "greeting", or "internet_data"
         """
         try:
             # Check for database-related keywords that indicate local data queries
@@ -280,13 +286,34 @@ Extracted terms (comma-separated):"""
             query_lower = query.lower()
             has_database_keywords = any(keyword in query_lower for keyword in database_keywords)
 
-            # Check for external market indicators
-            external_market_keywords = ['qqq', 'spy', 's&p 500', 's&p500', 'market index',
-                                       'nasdaq', 'dow jones', 'benchmark against']
-            has_external_keywords = any(keyword in query_lower for keyword in external_market_keywords)
+            # Check for real-time internet data keywords
+            internet_data_keywords = [
+                'current price', 'latest news', 'news on', 'price of',
+                'performance today', 'today\'s performance', 'real-time',
+                'live price', 'market news', 'stock news',
+                'bitcoin', 'crypto', 'cryptocurrency', 'btc', 'eth',
+                's&p 500 performance', 'nasdaq performance', 'dow jones performance',
+                'market update', 'latest on', 'what\'s the price',
+                # Market movers and trends
+                'top gainers', 'top losers', 'biggest movers', 'most active',
+                'trending stocks', 'market leaders', 'market laggards',
+                'gainers in', 'losers in', 'movers in',
+                # Time-based market queries
+                'this week', 'this month', 'today', 'yesterday',
+                'last week', 'last month', 'recent',
+                # Market indices and sectors
+                'nasdaq', 'dow jones', 's&p 500', 'sp500', 's&p',
+                'russell', 'market index', 'sector performance'
+            ]
+            has_internet_data_keywords = any(keyword in query_lower for keyword in internet_data_keywords)
 
-            # If it has database keywords and NO external market keywords, route to database
-            if has_database_keywords and not has_external_keywords:
+            # If query explicitly asks for real-time/current data, route to internet_data
+            if has_internet_data_keywords:
+                print(f"  → Query requires real-time internet data, routing to 'internet_data'")
+                return "internet_data"
+
+            # If it has database keywords and NO internet data keywords, route to database
+            if has_database_keywords and not has_internet_data_keywords:
                 print(f"  → Query contains database keywords, routing to 'database'")
                 return "database"
 
@@ -315,13 +342,19 @@ Extracted terms (comma-separated):"""
                     print(f"  → Routing to 'database' - handler will work with available portfolio data")
                     return "database"
                 elif found_in_db and not_found and not portfolios_found:
-                    # Mixed stocks: some in DB, some not, no portfolios -> needs internet comparison
-                    print(f"  → Mixed stocks (some in DB, some not), routing to 'internet_comparison'")
-                    return "internet_comparison"
+                    # Mixed stocks: some in DB, some not, no portfolios
+                    # If it's asking for current/live data, route to internet_data
+                    # Otherwise route to database for what we have
+                    if has_internet_data_keywords:
+                        print(f"  → Real-time data requested, routing to 'internet_data'")
+                        return "internet_data"
+                    else:
+                        print(f"  → Mixed stocks, routing to 'database' for available data")
+                        return "database"
                 elif not_found and not found_in_db:
                     # All mentioned stocks not in database -> needs internet
-                    print(f"  → No stocks found in database, routing to 'internet_comparison'")
-                    return "internet_comparison"
+                    print(f"  → No stocks found in database, routing to 'internet_data'")
+                    return "internet_data"
 
             # Fall back to LLM classification for non-stock queries
             start_time = time.time()
@@ -339,8 +372,8 @@ Extracted terms (comma-separated):"""
                 return "database"
             elif "greeting" in category or "chitchat" in category:
                 return "greeting"
-            elif "internet" in category or "comparison" in category:
-                return "internet_comparison"
+            elif "internet_data" in category or "internet" in category:
+                return "internet_data"
             else:
                 # Default to database for data-related queries
                 return "database"

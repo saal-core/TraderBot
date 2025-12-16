@@ -3,6 +3,8 @@ import pandas as pd
 from typing import List, Dict
 import sys
 import os
+import json
+from datetime import datetime
 
 
 # Import configuration and custom modules
@@ -12,7 +14,7 @@ from src.services.query_router import QueryRouter
 from src.services.database_handler import DatabaseQueryHandler
 from src.services.greating_handler import GreetingHandler
 from src.services.chat_memory import ChatMemory
-from src.services.internet_comparison_handler import InternetComparisonHandler
+from src.services.internet_data_handler import InternetDataHandler
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -82,8 +84,8 @@ def initialize_session_state():
     if "greeting_handler" not in st.session_state:
         st.session_state.greeting_handler = None
 
-    if "comparison_handler" not in st.session_state:
-        st.session_state.comparison_handler = None
+    if "internet_data_handler" not in st.session_state:
+        st.session_state.internet_data_handler = None
 
     if "sql_executor" not in st.session_state:
         st.session_state.sql_executor = None
@@ -91,6 +93,65 @@ def initialize_session_state():
     if "chat_memory" not in st.session_state:
         # Initialize chat memory with 5 Q&A pairs
         st.session_state.chat_memory = ChatMemory(max_pairs=5)
+
+    if "query_stats" not in st.session_state:
+        st.session_state.query_stats = {"database": 0, "greeting": 0, "internet_data": 0}
+
+
+def export_chat_history(format_type: str = "json") -> str:
+    """
+    Export chat history to JSON or TXT format
+
+    Args:
+        format_type: Either 'json' or 'txt'
+
+    Returns:
+        Formatted string of chat history
+    """
+    if format_type == "json":
+        # Create a clean export without dataframes
+        export_data = []
+        for msg in st.session_state.messages:
+            clean_msg = {
+                "role": msg["role"],
+                "content": msg["content"],
+                "timestamp": datetime.now().isoformat()
+            }
+            if "sql_query" in msg and msg["sql_query"]:
+                clean_msg["sql_query"] = msg["sql_query"]
+            export_data.append(clean_msg)
+        return json.dumps(export_data, indent=2)
+    else:  # txt format
+        txt_lines = [f"TraderBot Chat History - Exported at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"]
+        txt_lines.append("=" * 80 + "\n\n")
+
+        for i, msg in enumerate(st.session_state.messages, 1):
+            txt_lines.append(f"Message {i} - {msg['role'].upper()}\n")
+            txt_lines.append("-" * 40 + "\n")
+            txt_lines.append(f"{msg['content']}\n")
+            if "sql_query" in msg and msg["sql_query"]:
+                txt_lines.append(f"\nSQL Query:\n{msg['sql_query']}\n")
+            txt_lines.append("\n" + "=" * 80 + "\n\n")
+
+        return "".join(txt_lines)
+
+
+def get_query_statistics() -> Dict[str, int]:
+    """
+    Calculate statistics from chat history
+
+    Returns:
+        Dictionary with query type counts
+    """
+    stats = {"database": 0, "greeting": 0, "internet_data": 0, "total": 0}
+
+    for msg in st.session_state.messages:
+        if msg["role"] == "user":
+            stats["total"] += 1
+
+    # Return combined stats
+    stats.update(st.session_state.query_stats)
+    return stats
 
 
 def initialize_handlers():
@@ -116,7 +177,7 @@ def initialize_handlers():
             st.session_state.router = QueryRouter(sql_executor=st.session_state.sql_executor)
             st.session_state.db_handler = DatabaseQueryHandler(sql_executor=st.session_state.sql_executor)
             st.session_state.greeting_handler = GreetingHandler()
-            st.session_state.comparison_handler = InternetComparisonHandler()
+            st.session_state.internet_data_handler = InternetDataHandler()
 
             st.session_state.db_initialized = True
             st.success("✅ All components initialized successfully!")
@@ -130,11 +191,15 @@ def initialize_handlers():
 
 def display_chat_history():
     """Display chat message history"""
-    max_display = os.getenv("MAX_DISPLAY_MESSAGES", 10)
+    max_display = int(os.getenv("MAX_DISPLAY_MESSAGES", 10))
     messages_to_display = st.session_state.messages[-max_display:]
 
     for message in messages_to_display:
         with st.chat_message(message["role"]):
+            # Display timestamp if available
+            if "timestamp" in message:
+                st.caption(f"🕒 {message['timestamp']}")
+
             st.markdown(message["content"])
 
             # Display SQL query if present
@@ -221,8 +286,8 @@ def process_greeting(user_query: str) -> Dict:
     return response
 
 
-def process_internet_comparison(user_query: str) -> Dict:
-    """Process an internet comparison query using Perplexity API"""
+def process_internet_data(user_query: str) -> Dict:
+    """Process an internet data query using Perplexity API to fetch real-time financial information"""
     response = {
         "content": "",
         "sql_query": None,
@@ -230,13 +295,13 @@ def process_internet_comparison(user_query: str) -> Dict:
     }
 
     try:
-        with st.spinner("🌐 Searching online for information..."):
+        with st.spinner("🌐 Fetching real-time data from the internet..."):
             # Get chat history for context
             chat_history = st.session_state.messages
 
-            # Use Perplexity API to search and respond
-            comparison_response = st.session_state.comparison_handler.handle_comparison(user_query, chat_history)
-            response["content"] = f"🌐 {comparison_response}"
+            # Use Perplexity API to fetch real-time financial data
+            data_response = st.session_state.internet_data_handler.fetch_data(user_query, chat_history)
+            response["content"] = f"🌐 {data_response}"
 
     except Exception as e:
         response["content"] = f"❌ Error: {str(e)}"
@@ -290,20 +355,41 @@ def main():
 
         st.divider()
 
-        # Example queries
-        st.subheader("💡 Example Queries")
-        st.caption("Click to use these example queries:")
+        # Quick Actions Panel
+        st.subheader("⚡ Quick Actions")
 
-        example_queries = [
-            "Show me all records from the first table",
-            "Count total rows in each table",
-            "Hello!",
-            "What tables are available?",
-        ]
+        # Database queries
+        with st.expander("💾 Database Queries", expanded=False):
+            db_queries = [
+                "Show me all portfolios",
+                "Which stock has the highest profit?",
+                "What are my top 5 holdings?",
+            ]
+            for query in db_queries:
+                if st.button(query, key=f"db_{query}", use_container_width=True):
+                    st.session_state.example_query = query
 
-        for example in example_queries:
-            if st.button(f"📝 {example}", key=f"example_{example}", use_container_width=True):
-                st.session_state.example_query = example
+        # Internet data queries
+        with st.expander("🌐 Real-Time Data", expanded=False):
+            internet_queries = [
+                "What's the current price of Tesla?",
+                "Give me the latest news on Apple",
+                "What's the S&P 500 performance today?",
+                "What's Bitcoin's price?",
+            ]
+            for query in internet_queries:
+                if st.button(query, key=f"internet_{query}", use_container_width=True):
+                    st.session_state.example_query = query
+
+        # General queries
+        with st.expander("💬 General", expanded=False):
+            general_queries = [
+                "Hello!",
+                "What can you help me with?",
+            ]
+            for query in general_queries:
+                if st.button(query, key=f"general_{query}", use_container_width=True):
+                    st.session_state.example_query = query
 
         st.divider()
 
@@ -318,13 +404,60 @@ def main():
 
         st.divider()
 
-        # Display chat memory stats
-        if st.session_state.chat_memory and st.session_state.messages:
-            pairs_count = st.session_state.chat_memory.count_pairs(st.session_state.messages)
-            st.info(f"💬 Chat Memory: {pairs_count}/5 Q&A pairs")
+        # Chat Management Section
+        st.subheader("💬 Chat Management")
+
+        # Display chat statistics
+        if st.session_state.messages:
+            stats = get_query_statistics()
+            st.metric("Total Queries", stats["total"])
+
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("💾 DB", stats["database"])
+            with col2:
+                st.metric("🌐 Web", stats["internet_data"])
+            with col3:
+                st.metric("💬 Chat", stats["greeting"])
+
+            # Chat memory info
+            if st.session_state.chat_memory:
+                pairs_count = st.session_state.chat_memory.count_pairs(st.session_state.messages)
+                st.caption(f"📝 Context Memory: {pairs_count}/5 pairs")
+
+            st.divider()
+
+            # Export options
+            st.caption("📥 Export Chat History:")
+            col1, col2 = st.columns(2)
+
+            with col1:
+                if st.button("📄 Export TXT", use_container_width=True):
+                    txt_content = export_chat_history("txt")
+                    st.download_button(
+                        label="⬇️ Download TXT",
+                        data=txt_content,
+                        file_name=f"chat_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                        mime="text/plain",
+                        use_container_width=True
+                    )
+
+            with col2:
+                if st.button("📋 Export JSON", use_container_width=True):
+                    json_content = export_chat_history("json")
+                    st.download_button(
+                        label="⬇️ Download JSON",
+                        data=json_content,
+                        file_name=f"chat_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                        mime="application/json",
+                        use_container_width=True
+                    )
+
+        st.divider()
 
         if st.button("🗑️ Clear Chat History", use_container_width=True):
             st.session_state.messages = []
+            st.session_state.query_stats = {"database": 0, "greeting": 0, "internet_data": 0}
             st.rerun()
 
     # Check if initialized
@@ -357,15 +490,25 @@ def main():
 
     # Process user input
     if user_input:
-        # Add user message to chat
-        st.session_state.messages.append({"role": "user", "content": user_input})
+        # Add user message to chat with timestamp
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        st.session_state.messages.append({
+            "role": "user",
+            "content": user_input,
+            "timestamp": timestamp
+        })
 
         with st.chat_message("user"):
+            st.caption(f"🕒 {timestamp}")
             st.markdown(user_input)
 
         # Route the query
         with st.spinner("🤔 Understanding your question..."):
             query_type = st.session_state.router.classify_query(user_input)
+
+        # Track query statistics
+        if query_type in st.session_state.query_stats:
+            st.session_state.query_stats[query_type] += 1
 
         st.info(f"📌 Query Type: **{query_type}**")
 
@@ -375,8 +518,8 @@ def main():
                 response = process_database_query(user_input)
             elif query_type == "greeting":
                 response = process_greeting(user_input)
-            elif query_type == "internet_comparison":
-                response = process_internet_comparison(user_input)
+            elif query_type == "internet_data":
+                response = process_internet_data(user_input)
             else:
                 response = {
                     "content": "❌ Sorry, I couldn't understand your question.",
@@ -397,12 +540,14 @@ def main():
                 with st.expander("📊 View Results Table"):
                     st.dataframe(response["results_df"], use_container_width=True)
 
-        # Add assistant response to history
+        # Add assistant response to history with timestamp
+        assistant_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         st.session_state.messages.append({
             "role": "assistant",
             "content": response["content"],
             "sql_query": response.get("sql_query"),
-            "results_df": response.get("results_df")
+            "results_df": response.get("results_df"),
+            "timestamp": assistant_timestamp
         })
 
 
