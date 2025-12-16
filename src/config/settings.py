@@ -80,6 +80,19 @@ def get_app_config() -> Dict[str, Any]:
     }
 
 
+def get_perplexity_config() -> Dict[str, Any]:
+    """
+    Get Perplexity API configuration as a dictionary
+
+    Returns:
+        Dictionary containing Perplexity configuration
+    """
+    return {
+        "api_key": os.getenv("PERPLEXITY_API_KEY"),
+        "api_url": os.getenv("PERPLEXITY_API_URL", "https://api.perplexity.ai/chat/completions"),
+    }
+
+
 def get_vanna_config() -> Dict[str, Any]:
     return {
         "model": os.getenv("OLLAMA_MODEL"),

@@ -12,7 +12,7 @@ from src.services.query_router import QueryRouter
 from src.services.database_handler import DatabaseQueryHandler
 from src.services.greating_handler import GreetingHandler
 from src.services.chat_memory import ChatMemory
-# from src.services.perplexity_service import InternetComparisonHandler
+from src.services.internet_comparison_handler import InternetComparisonHandler
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -116,7 +116,7 @@ def initialize_handlers():
             st.session_state.router = QueryRouter(sql_executor=st.session_state.sql_executor)
             st.session_state.db_handler = DatabaseQueryHandler(sql_executor=st.session_state.sql_executor)
             st.session_state.greeting_handler = GreetingHandler()
-            # st.session_state.comparison_handler = InternetComparisonHandler()
+            st.session_state.comparison_handler = InternetComparisonHandler()
 
             st.session_state.db_initialized = True
             st.success("✅ All components initialized successfully!")
@@ -222,7 +222,7 @@ def process_greeting(user_query: str) -> Dict:
 
 
 def process_internet_comparison(user_query: str) -> Dict:
-    """Process an internet comparison query (placeholder)"""
+    """Process an internet comparison query using Perplexity API"""
     response = {
         "content": "",
         "sql_query": None,
@@ -230,8 +230,12 @@ def process_internet_comparison(user_query: str) -> Dict:
     }
 
     try:
-        with st.spinner("🌐 Processing comparison request..."):
-            comparison_response = st.session_state.comparison_handler.handle_comparison(user_query)
+        with st.spinner("🌐 Searching online for information..."):
+            # Get chat history for context
+            chat_history = st.session_state.messages
+
+            # Use Perplexity API to search and respond
+            comparison_response = st.session_state.comparison_handler.handle_comparison(user_query, chat_history)
             response["content"] = f"🌐 {comparison_response}"
 
     except Exception as e:

@@ -3,10 +3,22 @@ import logging
 import traceback
 from typing import List, Dict
 import requests
-from config.prompts import PERPLEXITY_SYSTEM_PROMPT
-from helpers import clean_text
+import os
+from dotenv import load_dotenv
 
-settings = get_settings()
+load_dotenv()
+
+# Default system prompt for Perplexity
+PERPLEXITY_SYSTEM_PROMPT = (
+    "You are a helpful financial assistant with access to real-time web information. "
+    "Provide accurate, concise, and well-sourced answers to financial questions. "
+    "Focus on factual information and cite your sources when possible."
+)
+
+
+def clean_text(text: str) -> str:
+    """Basic text cleaning function."""
+    return text.strip()
 
 
 class PerplexityService:
@@ -14,8 +26,8 @@ class PerplexityService:
 
     def __init__(self):
         """Initialize Perplexity service."""
-        self.api_key = settings.perplexity_api_key
-        self.api_url = settings.perplexity_api_url
+        self.api_key = os.getenv("PERPLEXITY_API_KEY")
+        self.api_url = os.getenv("PERPLEXITY_API_URL", "https://api.perplexity.ai/chat/completions")
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
