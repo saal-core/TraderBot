@@ -3,9 +3,9 @@ import logging
 import traceback
 from typing import List, Dict
 import ollama
-from config.settings import get_settings
+from src.config.settings import get_ollama_config
 
-settings = get_settings()
+ollama_config = get_ollama_config()
 
 
 class OllamaService:
@@ -18,7 +18,7 @@ class OllamaService:
         Args:
             model: Ollama model name (defaults to settings value)
         """
-        self.model = model or settings.ollama_model
+        self.model = model or ollama_config["model_name"]
 
     def generate_response(
         self,

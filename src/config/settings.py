@@ -93,6 +93,19 @@ def get_perplexity_config() -> Dict[str, Any]:
     }
 
 
+def get_fmp_config() -> Dict[str, Any]:
+    """
+    Get FMP (Financial Modeling Prep) API configuration as a dictionary
+
+    Returns:
+        Dictionary containing FMP configuration
+    """
+    return {
+        "api_key": os.getenv("FMP_API_KEY"),
+        "base_url": os.getenv("FMP_BASE_URL", "https://financialmodelingprep.com/api/v3"),
+    }
+
+
 def get_vanna_config() -> Dict[str, Any]:
     return {
         "model": os.getenv("OLLAMA_MODEL"),

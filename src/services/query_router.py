@@ -158,7 +158,8 @@ Category:"""
 
     def _extract_stock_symbols(self, query: str) -> List[str]:
         """
-        Extract potential stock symbols/names from query using LLM
+        Extract potential stock symbols/names from query using regex.
+        Fast approach - no LLM call required. Fuzzy matching is handled by _check_symbols_in_database.
 
         Args:
             query: User's question
@@ -166,46 +167,28 @@ Category:"""
         Returns:
             List of potential stock symbols/names mentioned
         """
-        extraction_prompt = PromptTemplate(
-            input_variables=["query"],
-            template="""Extract any stock names, company names, or stock symbols mentioned in this question.
-Return only the extracted terms, separated by commas. If none found, return "NONE".
-
-Examples:
-- "Compare ABalanced performance against QQQ" -> ABalanced, QQQ
-- "What is the price of AAPL stock?" -> AAPL
-- "Show me MSFT and GOOGL performance" -> MSFT, GOOGL
-- "How is Tesla doing?" -> Tesla
-- "What are my portfolios?" -> NONE
-
-Question: {query}
-
-Extracted terms (comma-separated):"""
-        )
-
-        extraction_chain = extraction_prompt | self.llm | StrOutputParser()
-
-        try:
-            start_time = time.time()
-            print(f"⏱️  Starting: Stock Symbol Extraction...")
-
-            result = extraction_chain.invoke({"query": query})
-
-            elapsed = time.time() - start_time
-            print(f"✅ Completed: Stock Symbol Extraction in {elapsed:.2f}s")
-
-            result = result.strip()
-
-            if result.upper() == "NONE" or not result:
-                return []
-
-            # Split by comma and clean
-            terms = [term.strip() for term in result.split(',') if term.strip()]
-            return terms
-        except Exception as e:
-            elapsed = time.time() - start_time
-            print(f"❌ Failed: Stock Symbol Extraction after {elapsed:.2f}s - Error: {e}")
-            return []
+        extracted = []
+        
+        # Extract uppercase symbols (2-5 letters) - e.g., AAPL, MSFT, QQQ
+        symbols = re.findall(r'\b[A-Z]{2,5}\b', query)
+        for symbol in symbols:
+            if symbol not in extracted:
+                extracted.append(symbol)
+        
+        # Extract mixed-case terms that could be portfolio names or stock names
+        # e.g., "ABalanced", "Tesla", "Apple"
+        mixed_case_pattern = re.findall(r'\b[A-Z][A-Za-z0-9-]{1,20}\b', query)
+        common_words = {
+            'The', 'What', 'How', 'Why', 'When', 'Show', 'Give', 'Get', 'My', 'Our', 
+            'Is', 'Are', 'Do', 'Does', 'Can', 'Could', 'Would', 'Should', 'Compare', 
+            'Tell', 'List', 'And', 'Or', 'For', 'With', 'From', 'To', 'In', 'On',
+            'All', 'Any', 'Some', 'This', 'That', 'Which', 'Where', 'Who', 'Whose'
+        }
+        for term in mixed_case_pattern:
+            if term not in common_words and term not in extracted:
+                extracted.append(term)
+        
+        return extracted
 
     def _check_symbols_in_database(self, mentioned_terms: List[str]) -> Tuple[List[str], List[str], List[str]]:
         """
