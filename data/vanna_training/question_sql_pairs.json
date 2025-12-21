@@ -1,0 +1,174 @@
+[
+  {
+    "question": "How many portfolios are there?",
+    "sql": "SELECT COUNT(DISTINCT portfolio_name) FROM ai_trading.portfolio_summary WHERE is_active = 1;"
+  },
+  {
+    "question": "List all active portfolios.",
+    "sql": "SELECT DISTINCT portfolio_name FROM ai_trading.portfolio_summary WHERE is_active = 1 ORDER BY portfolio_name;"
+  },
+  {
+    "question": "Show me the holdings in the 'F-R&D-600K' portfolio.",
+    "sql": "SELECT symbol, positions, market_value FROM ai_trading.portfolio_holdings WHERE portfolio_name = 'F-R&D-600K';"
+  },
+  {
+    "question": "What is the total value of all portfolios combined?",
+    "sql": "SELECT SUM(net_liquidity) FROM ai_trading.portfolio_summary WHERE is_active = 1 AND datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_summary WHERE is_active = 1);"
+  },
+  {
+    "question": "What are the different portfolio groups?",
+    "sql": "SELECT DISTINCT group_name FROM ai_trading.portfolio_summary WHERE group_name IS NOT NULL;"
+  },
+  {
+    "question": "ما هو ربح السنة حتى اليوم لكل محفظة",
+    "sql": "SELECT portfolio_name, ytd_profit FROM ai_trading.portfolio_summary WHERE datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_summary) ORDER BY ytd_profit DESC;"
+  },
+  {
+    "question": "What is the Year-To-Date profit for each portfolio?",
+    "sql": "SELECT portfolio_name, ytd_profit FROM ai_trading.portfolio_summary WHERE datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_summary) ORDER BY ytd_profit DESC;"
+  },
+  {
+    "question": "Which portfolio has the highest all-time return?",
+    "sql": "SELECT portfolio_name, all_return FROM ai_trading.portfolio_summary ORDER BY all_return DESC LIMIT 1;"
+  },
+  {
+    "question": "List portfolios by their month-to-date return.",
+    "sql": "SELECT portfolio_name, mtd_return FROM ai_trading.portfolio_summary ORDER BY mtd_return DESC;"
+  },
+  {
+    "question": "What is the daily return for the 'Tech Growth' portfolio?",
+    "sql": "SELECT daily_return FROM ai_trading.portfolio_summary WHERE portfolio_name = 'Tech Growth' ORDER BY datetime DESC LIMIT 1;"
+  },
+  {
+    "question": "What is the highest realized profit from a single stock?",
+    "sql": "SELECT symbol, portfolio_name, ytd_realized_pnl FROM ai_trading.portfolio_holdings_realized_pnl ORDER BY ytd_realized_pnl DESC LIMIT 1;"
+  },
+  {
+    "question": "List the top 10 most profitable stocks overall.",
+    "sql": "SELECT symbol, SUM(ytd_total_pnl) AS total_profit FROM ai_trading.portfolio_holdings_realized_pnl GROUP BY symbol ORDER BY total_profit DESC LIMIT 10;"
+  },
+  {
+    "question": "Show me the 10 biggest losing stocks.",
+    "sql": "SELECT symbol, SUM(ytd_total_pnl) AS total_profit FROM ai_trading.portfolio_holdings_realized_pnl GROUP BY symbol ORDER BY total_profit ASC LIMIT 10;"
+  },
+  {
+    "question": "Which holdings are currently at a loss?",
+    "sql": "SELECT symbol, portfolio_name, ytd_total_pnl FROM ai_trading.portfolio_holdings_realized_pnl WHERE ytd_total_pnl < 0 ORDER BY ytd_total_pnl ASC;"
+  },
+  {
+    "question": "What is the total amount of investment that was used?",
+    "sql": "SELECT SUM(utilized_amount) AS total_investment_used FROM ai_trading.portfolio_summary WHERE is_active = 1 AND datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_summary WHERE is_active = 1);"
+  },
+  {
+    "question": "Which portfolio has the most cash available to invest?",
+    "sql": "SELECT portfolio_name, (allocated_amount - utilized_amount) AS available_funds FROM ai_trading.portfolio_summary WHERE is_active = 1 AND datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_summary WHERE is_active = 1) ORDER BY available_funds DESC LIMIT 10;"
+  },
+  {
+    "question": "List portfolios by their unutilized capital.",
+    "sql": "SELECT portfolio_name, (allocated_amount - utilized_amount) AS unutilized_capital FROM ai_trading.portfolio_summary WHERE is_active = 1 AND datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_summary WHERE is_active = 1) ORDER BY unutilized_capital DESC;"
+  },
+  {
+    "question": "What is the historical trend of the FDX holding’s market value in the F‑R&D‑600K portfolio?",
+    "sql": "SELECT datetime, market_value FROM ai_trading.portfolio_holdings WHERE portfolio_name = 'F-R&D-600K' AND symbol = 'FDX' ORDER BY datetime ASC;"
+  },
+  {
+    "question": "Show me the market value history for AAPL in the 'Tech Growth' portfolio over time.",
+    "sql": "SELECT datetime, market_value FROM ai_trading.portfolio_holdings WHERE portfolio_name = 'Tech Growth' AND symbol = 'AAPL' ORDER BY datetime ASC;"
+  },
+  {
+    "question": "Plot the trend of GOOG positions in the Alpha fund.",
+    "sql": "SELECT datetime, positions FROM ai_trading.portfolio_holdings WHERE portfolio_name = 'Alpha fund' AND symbol = 'GOOG' ORDER BY datetime ASC;"
+  },
+  {
+    "question": "How many wallets are there?",
+    "sql": "SELECT COUNT(DISTINCT portfolio_name) FROM ai_trading.portfolio_summary WHERE is_active = 1;"
+  },
+  {
+    "question": "Show me the profit since the start of the year for every wallet.",
+    "sql": "SELECT portfolio_name, ytd_profit FROM ai_trading.portfolio_summary WHERE datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_summary) ORDER BY ytd_profit DESC;"
+  },
+  {
+    "question": "Which portfolios contain the largest amount of funds available for new investments?",
+    "sql": "SELECT portfolio_name, (allocated_amount - utilized_amount) AS available_funds\n    FROM ai_trading.portfolio_summary\n    WHERE is_active = 1 AND datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_summary WHERE is_active = 1)\n    ORDER BY available_funds DESC;"
+  },
+  {
+    "question": "Show the total quantity held for each stock symbol, sorted by the highest quantity first.",
+    "sql": "SELECT symbol, sum(positions) AS qty FROM ai_trading.portfolio_holdings_realized_pnl GROUP BY symbol ORDER BY qty DESC"
+  },
+  {
+    "question": "How do portfolios perform across groups?",
+    "sql": "SELECT \n        group_name,\n        COUNT(portfolio_name) AS number_of_portfolios,\n        AVG(ytd_return) AS average_ytd_return,\n        SUM(ytd_profit) AS total_ytd_profit,\n        AVG(all_return) AS average_all_time_return,\n        SUM(all_profit) AS total_all_time_profit\n    FROM \n        ai_trading.portfolio_summary\n    WHERE \n        is_active = 1 \n        AND group_name IS NOT NULL\n        AND datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_summary WHERE is_active = 1)\n    GROUP BY \n        group_name\n    ORDER BY \n        average_ytd_return DESC;"
+  },
+  {
+    "question": "Compare performance between different portfolio groups.",
+    "sql": "SELECT \n        group_name,\n        COUNT(portfolio_name) AS number_of_portfolios,\n        AVG(ytd_return) AS average_ytd_return,\n        SUM(ytd_profit) AS total_ytd_profit,\n        AVG(all_return) AS average_all_time_return,\n        SUM(all_profit) AS total_all_time_profit\n    FROM \n        ai_trading.portfolio_summary\n    WHERE \n        is_active = 1 \n        AND group_name IS NOT NULL\n        AND datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_summary WHERE is_active = 1)\n    GROUP BY \n        group_name\n    ORDER BY \n        average_ytd_return DESC;"
+  },
+  {
+    "question": "When was the last update for the F-R&D-600K portfolio?",
+    "sql": "SELECT last_updated_time\n    FROM ai_trading.portfolio_summary\n    WHERE portfolio_name = 'F-R&D-600K'\n    ORDER BY datetime DESC\n    LIMIT 1;"
+  },
+  {
+    "question": "What is the latest update timestamp for the 'Tech Growth' wallet?",
+    "sql": "SELECT last_updated_time\n    FROM ai_trading.portfolio_summary\n    WHERE portfolio_name = 'Tech Growth'\n    ORDER BY datetime DESC\n    LIMIT 1;"
+  },
+  {
+    "question": "Show me the last time the portfolio summaries were updated.",
+    "sql": "SELECT MAX(last_updated_time) AS latest_update\n    FROM ai_trading.portfolio_summary;"
+  },
+  {
+    "question": "what is the total investment amount across all portfolios",
+    "sql": "SELECT SUM(allocated_amount) AS total_investment_across_all_portfolios \n    FROM ai_trading.portfolio_summary\n    WHERE is_active = 1 AND datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_summary WHERE is_active = 1);"
+  },
+  {
+    "question": "What is the total capital allocated across all active portfolios?",
+    "sql": "SELECT SUM(allocated_amount) AS total_capital_allocated\n    FROM ai_trading.portfolio_summary\n    WHERE is_active = 1 AND datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_summary WHERE is_active = 1);"
+  },
+  {
+    "question": "Sum up the allocated amounts for every portfolio.",
+    "sql": "SELECT SUM(allocated_amount) AS total_allocated_amount\n    FROM ai_trading.portfolio_summary\n    WHERE is_active = 1 AND datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_summary WHERE is_active = 1);"
+  },
+  {
+    "question": "What is the description of each portfolio?",
+    "sql": "SELECT portfolio_name, portfolio_description\n    FROM ai_trading.portfolio_summary\n    WHERE portfolio_description IS NOT NULL;"
+  },
+  {
+    "question": "Show me the strategy for every portfolio.",
+    "sql": "SELECT portfolio_name, portfolio_description\n    FROM ai_trading.portfolio_summary\n    WHERE portfolio_description IS NOT NULL;"
+  },
+  {
+    "question": "what is total return each portfolio since inception",
+    "sql": "SELECT \n        portfolio_name, \n        all_return\n    FROM \n        ai_trading.portfolio_summary\n    WHERE \n        is_active = 1 \n        AND datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_summary WHERE is_active = 1)\n    ORDER BY \n        all_return DESC;"
+  },
+  {
+    "question": "Show me the all-time return for every portfolio.",
+    "sql": "SELECT \n        portfolio_name, \n        all_return\n    FROM \n        ai_trading.portfolio_summary\n    WHERE \n        is_active = 1 \n        AND datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_summary WHERE is_active = 1)\n    ORDER BY \n        all_return DESC;"
+  },
+  {
+    "question": "which portfolios have negative returns",
+    "sql": "-- Defaulting to all-time return for the general question 'negative returns'\n    SELECT \n        portfolio_name, \n        all_return\n    FROM \n        ai_trading.portfolio_summary\n    WHERE \n        is_active = 1 \n        AND all_return < 0\n        AND datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_summary WHERE is_active = 1)\n    ORDER BY \n        all_return ASC;"
+  },
+  {
+    "question": "Show me any portfolios that are losing money overall.",
+    "sql": "-- Defaulting to all-time return for 'losing money overall'\n    SELECT \n        portfolio_name, \n        all_return,\n        all_profit\n    FROM \n        ai_trading.portfolio_summary\n    WHERE \n        is_active = 1 \n        AND all_return < 0\n        AND datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_summary WHERE is_active = 1)\n    ORDER BY \n        all_return ASC;"
+  },
+  {
+    "question": "What cost models are being used for different portfolios?",
+    "sql": "SELECT DISTINCT portfolio_name, cost_model\n    FROM ai_trading.portfolio_summary\n    WHERE cost_model IS NOT NULL\n    ORDER BY portfolio_name;"
+  },
+  {
+    "question": "Show me the cost basis method for each portfolio.",
+    "sql": "SELECT portfolio_name, cost_model\n    FROM ai_trading.portfolio_summary\n    WHERE cost_model IS NOT NULL\n    ORDER BY portfolio_name;"
+  },
+  {
+    "question": "List the accounting methods for our wallets.",
+    "sql": "SELECT portfolio_name, cost_model\n    FROM ai_trading.portfolio_summary\n    WHERE cost_model IS NOT NULL;"
+  },
+  {
+    "question": "What was my best-performing stock last quarter?",
+    "sql": "-- NOTE: Quarter-to-date data is not available at the individual stock level.\n    -- This query provides the best-performing stock based on Year-To-Date (YTD) total profit as the closest approximation.\n    SELECT \n        symbol,\n        SUM(ytd_total_pnl) AS year_to_date_total_profit\n    FROM \n        ai_trading.portfolio_holdings_realized_pnl\n    GROUP BY\n        symbol\n    ORDER BY \n        year_to_date_total_profit DESC\n    LIMIT 1;"
+  },
+  {
+    "question": "Which stock had the highest returns last month?",
+    "sql": "-- NOTE: Month-to-date data is not available at the individual stock level.\n    -- This query provides the top 5 performing stocks based on Year-To-Date (YTD) total profit as the closest approximation.\n    SELECT \n        symbol,\n        SUM(ytd_total_pnl) AS year_to_date_total_profit\n    FROM \n        ai_trading.portfolio_holdings_realized_pnl\n    GROUP BY\n        symbol\n    ORDER BY \n        year_to_date_total_profit DESC\n    LIMIT 5;"
+  }
+]
