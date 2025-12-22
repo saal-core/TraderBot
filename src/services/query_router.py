@@ -158,35 +158,54 @@ Category:"""
 
     def _extract_stock_symbols(self, query: str) -> List[str]:
         """
-        Extract potential stock symbols/names from query using regex.
-        Fast approach - no LLM call required. Fuzzy matching is handled by _check_symbols_in_database.
+        Extract stock symbols/portfolio names from query by fuzzy matching against database.
+        Fast approach using rapidfuzz against cached database symbols/portfolios.
 
         Args:
             query: User's question
 
         Returns:
-            List of potential stock symbols/names mentioned
+            List of matched stock symbols/portfolio names
         """
+        # Get all symbols and portfolios from database (cached)
+        all_symbols = self._get_all_symbols()
+        all_portfolios = self._get_all_portfolios()
+        all_data_sources = all_symbols + all_portfolios
+        
+        if not all_data_sources:
+            return []
+        
+        # Tokenize the query into words
+        words = re.findall(r'\b\w+\b', query)
+        
         extracted = []
+        all_data_upper = [s.upper() for s in all_data_sources]
         
-        # Extract uppercase symbols (2-5 letters) - e.g., AAPL, MSFT, QQQ
-        symbols = re.findall(r'\b[A-Z]{2,5}\b', query)
-        for symbol in symbols:
-            if symbol not in extracted:
-                extracted.append(symbol)
-        
-        # Extract mixed-case terms that could be portfolio names or stock names
-        # e.g., "ABalanced", "Tesla", "Apple"
-        mixed_case_pattern = re.findall(r'\b[A-Z][A-Za-z0-9-]{1,20}\b', query)
-        common_words = {
-            'The', 'What', 'How', 'Why', 'When', 'Show', 'Give', 'Get', 'My', 'Our', 
-            'Is', 'Are', 'Do', 'Does', 'Can', 'Could', 'Would', 'Should', 'Compare', 
-            'Tell', 'List', 'And', 'Or', 'For', 'With', 'From', 'To', 'In', 'On',
-            'All', 'Any', 'Some', 'This', 'That', 'Which', 'Where', 'Who', 'Whose'
-        }
-        for term in mixed_case_pattern:
-            if term not in common_words and term not in extracted:
-                extracted.append(term)
+        for word in words:
+            word_upper = word.upper()
+            
+            # Skip very short words (less than 2 chars)
+            if len(word) < 2:
+                continue
+            
+            # Direct match first
+            if word_upper in all_data_upper:
+                matched_value = all_data_sources[all_data_upper.index(word_upper)]
+                if matched_value not in extracted:
+                    extracted.append(matched_value)
+                continue
+            
+            # Fuzzy match using rapidfuzz
+            best_match = process.extractOne(
+                word_upper,
+                all_data_upper,
+                scorer=fuzz.ratio,
+                score_cutoff=80
+            )
+            if best_match:
+                matched_value = all_data_sources[all_data_upper.index(best_match[0])]
+                if matched_value not in extracted:
+                    extracted.append(matched_value)
         
         return extracted
 
@@ -314,125 +333,160 @@ Category:"""
                 return True
 
         return False
-
+        
     def classify_query(self, query: str) -> str:
         """
-        Classify a user query into one of the routing categories with database-aware logic
-
-        Args:
-            query: User's input query
-
-        Returns:
-            Category string: "database", "greeting", "internet_data", or "comparison"
+        Classify a user query with corrected priority ordering
         """
-        try:
-            query_lower = query.lower()
+        query_lower = query.lower()
 
-            # STEP 1: Quick check for comparison queries (highest priority for mixed queries)
-            if self._is_comparison_query(query):
-                print(f"  → Detected comparison query pattern, routing to 'comparison'")
-                return "comparison"
-
-            # STEP 2: Check for database-related keywords that indicate local data queries
-            database_keywords = [
-                'holding', 'holdings', 'portfolio', 'position', 'positions',
-                'unrealized', 'profit', 'loss', 'gain', 'return',
-                'my stock', 'my stocks', 'our stock', 'our stocks',
-                'quantity', 'lot', 'lots', 'shares', 'invested',
-                'total value', 'market value', 'cost basis'
-            ]
-
-            has_database_keywords = any(keyword in query_lower for keyword in database_keywords)
-
-            # STEP 3: Check for real-time internet data keywords
-            internet_data_keywords = [
-                'current price', 'latest news', 'news on', 'price of',
-                'performance today', 'today\'s performance', 'real-time',
-                'live price', 'market news', 'stock news',
-                'bitcoin', 'crypto', 'cryptocurrency', 'btc', 'eth',
-                's&p 500 performance', 'nasdaq performance', 'dow jones performance',
-                'market update', 'latest on', 'what\'s the price',
-                'top gainers', 'top losers', 'biggest movers', 'most active',
-                'trending stocks', 'market leaders', 'market laggards',
-                'gainers in', 'losers in', 'movers in',
-                'this week', 'this month', 'today', 'yesterday',
-                'last week', 'last month', 'recent',
-                'nasdaq', 'dow jones', 's&p 500', 'sp500', 's&p',
-                'russell', 'market index', 'sector performance'
-            ]
-            has_internet_data_keywords = any(keyword in query_lower for keyword in internet_data_keywords)
-
-            # STEP 4: If query has BOTH local and internet keywords, it might be comparison
-            if has_database_keywords and has_internet_data_keywords:
-                # Check if there's any comparison intent
-                comparison_hints = ['vs', 'versus', 'against', 'compare', 'compared', 'benchmark', 'outperform']
-                if any(hint in query_lower for hint in comparison_hints):
-                    print(f"  → Query has both local and external keywords with comparison intent, routing to 'comparison'")
-                    return "comparison"
-
-            # STEP 5: If query explicitly asks for real-time/current data only, route to internet_data
-            if has_internet_data_keywords and not has_database_keywords:
-                print(f"  → Query requires real-time internet data, routing to 'internet_data'")
+        # ============================================================
+        # STEP 1: INTERNET-FIRST PATTERNS (Highest Priority)
+        # These patterns ALWAYS indicate internet data is needed,
+        # regardless of whether stock symbols exist in our database
+        # ============================================================
+        
+        # Hypothetical investment calculations - ALWAYS internet
+        hypothetical_patterns = [
+            r'if i had invested',
+            r'had i invested', 
+            r'if i invested',
+            r'would it be worth',
+            r'would be worth now',
+            r'how much would .* be worth',
+            r'what would .* be worth',
+            r'invested .* in january|february|march|april|may|june|july|august|september|october|november|december',
+        ]
+        for pattern in hypothetical_patterns:
+            if re.search(pattern, query_lower):
+                print(f"  → Hypothetical investment query detected, routing to 'internet_data'")
                 return "internet_data"
 
-            # STEP 6: If it has database keywords and NO internet data keywords, route to database
-            if has_database_keywords and not has_internet_data_keywords:
-                print(f"  → Query contains database keywords, routing to 'database'")
+        # Market movers / rankings - ALWAYS internet (real-time data)
+        market_mover_patterns = [
+            r'top (gainers?|losers?|movers?)',
+            r'biggest (gainers?|losers?|movers?)',
+            r'(gainers?|losers?|movers?) (in|on|for) .*(nasdaq|nyse|s&p|dow|market)',
+            r'(nasdaq|nyse|s&p|dow|russell).*this (week|month|day)',
+            r'this (week|month).*(?:nasdaq|nyse|s&p|dow)',
+            r'trending stocks',
+            r'most active stocks',
+        ]
+        for pattern in market_mover_patterns:
+            if re.search(pattern, query_lower):
+                print(f"  → Market movers/rankings query detected, routing to 'internet_data'")
+                return "internet_data"
+
+        # News queries - ALWAYS internet
+        news_patterns = [
+            r'(any |latest |recent )?news (about|on|regarding|affecting)',
+            r'news impact',
+            r'what.*(happening|going on).*(with|at|in)',
+            r'(oil|commodity|commodities) prices? affecting',
+        ]
+        for pattern in news_patterns:
+            if re.search(pattern, query_lower):
+                print(f"  → News query detected, routing to 'internet_data'")
+                return "internet_data"
+
+        # Current/live price requests - ALWAYS internet
+        price_patterns = [
+            r'(current|live|latest|real-?time) price',
+            r"what'?s the price of",
+            r'price of .* (today|now|currently)',
+            r'how much (is|does) .* (cost|trading|worth) (now|today)',
+        ]
+        for pattern in price_patterns:
+            if re.search(pattern, query_lower):
+                print(f"  → Current price query detected, routing to 'internet_data'")
+                return "internet_data"
+
+        # ============================================================
+        # STEP 2: COMPARISON QUERIES
+        # ============================================================
+        if self._is_comparison_query(query):
+            print(f"  → Detected comparison query pattern, routing to 'comparison'")
+            return "comparison"
+
+        # ============================================================
+        # STEP 3: GREETING CHECK
+        # ============================================================
+        greeting_patterns = [
+            r'^(hi|hello|hey|good morning|good afternoon|good evening)[\s!.,]*$',
+            r'^how are you',
+            r'^thank(s| you)',
+            r'^bye|goodbye|see you',
+        ]
+        for pattern in greeting_patterns:
+            if re.search(pattern, query_lower):
+                return "greeting"
+
+        # ============================================================
+        # STEP 4: DATABASE-SPECIFIC PATTERNS
+        # Only route to database if query is clearly about LOCAL data
+        # ============================================================
+        
+        # Strong database indicators (possessive + data terms)
+        database_patterns = [
+            r'(my|our) (portfolio|holdings?|positions?|stocks?|investments?)',
+            r'(show|list|display) (my|our|all) (portfolio|holdings?|positions?)',
+            r'(my|our) (profit|loss|returns?|gains?)',
+            r'(unrealized|realized) (profit|loss|gains?|pnl)',
+            r'(portfolio|holdings?) (summary|overview|breakdown)',
+            r'how (is|are) (my|our) (portfolio|holdings?|stocks?) (doing|performing)',
+            r'(total|current) (value|worth) of (my|our)',
+        ]
+        for pattern in database_patterns:
+            if re.search(pattern, query_lower):
+                print(f"  → Local portfolio query detected, routing to 'database'")
                 return "database"
 
-            # STEP 7: Check for stock symbol mentions
-            mentioned_terms = self._extract_stock_symbols(query)
+        # ============================================================
+        # STEP 5: SYMBOL-BASED ROUTING (with context awareness)
+        # ============================================================
+        mentioned_terms = self._extract_stock_symbols(query)
+        
+        if mentioned_terms and self.sql_executor:
+            found_in_db, not_found, portfolios_found = self._check_symbols_in_database(mentioned_terms)
+            
+            # Only route to database if:
+            # 1. Symbols are found AND
+            # 2. Query is asking about holdings/positions (not general info)
+            holdings_context_words = [
+                'holding', 'position', 'quantity', 'shares', 'lots',
+                'bought', 'sold', 'cost basis', 'unrealized', 'realized',
+                'my', 'our', 'portfolio'
+            ]
+            
+            has_holdings_context = any(word in query_lower for word in holdings_context_words)
+            
+            if found_in_db and has_holdings_context:
+                print(f"  → Symbols {found_in_db} found in DB with holdings context, routing to 'database'")
+                return "database"
+            elif found_in_db and not has_holdings_context:
+                # Symbol exists in DB but query might be asking for external info
+                # e.g., "What's the news on NVIDIA?" - NVIDIA in DB but asking for news
+                print(f"  → Symbols {found_in_db} found but no holdings context, routing to 'internet_data'")
+                return "internet_data"
+            elif not_found:
+                print(f"  → Symbols {not_found} not in DB, routing to 'internet_data'")
+                return "internet_data"
 
-            if mentioned_terms and self.sql_executor:
-                found_in_db, not_found, portfolios_found = self._check_symbols_in_database(mentioned_terms)
-
-                print(f"  → Stock symbols extracted: {mentioned_terms}")
-                print(f"  → Found in database: {found_in_db}")
-                print(f"  → Portfolios found: {portfolios_found}")
-                print(f"  → Not found in database: {not_found}")
-
-                # Smart routing based on database availability and query type
-                if found_in_db and not not_found:
-                    # All mentioned stocks/portfolios are in database
-                    print(f"  → All symbols found in database, routing to 'database'")
-                    return "database"
-                elif portfolios_found and not_found:
-                    # Portfolio + external reference - likely a comparison
-                    # Check for comparison keywords
-                    if any(kw in query_lower for kw in ['vs', 'versus', 'against', 'compare', 'benchmark']):
-                        print(f"  → Portfolio with external reference detected, routing to 'comparison'")
-                        return "comparison"
-                    print(f"  → Portfolio comparison detected, routing to 'database'")
-                    return "database"
-                elif not_found and not found_in_db:
-                    # All mentioned stocks not in database
-                    print(f"  → No stocks found in database, routing to 'internet_data'")
-                    return "internet_data"
-
-            # STEP 8: Fall back to LLM classification
-            start_time = time.time()
-            print(f"⏱️  Starting: Query Classification (LLM)...")
-
+        # ============================================================
+        # STEP 6: LLM FALLBACK
+        # ============================================================
+        try:
             response = self.routing_chain.invoke({"query": query})
-
-            elapsed = time.time() - start_time
-            print(f"✅ Completed: Query Classification in {elapsed:.2f}s")
-
             category = response.strip().lower()
-
-            # Normalize the response
+            
             if "comparison" in category:
                 return "comparison"
             elif "database" in category:
                 return "database"
-            elif "greeting" in category or "chitchat" in category:
+            elif "greeting" in category:
                 return "greeting"
-            elif "internet_data" in category or "internet" in category:
-                return "internet_data"
             else:
-                # Default to database for data-related queries
-                return "database"
-
+                return "internet_data"
         except Exception as e:
-            print(f"❌ Error in query classification: {e}")
-            return "database"  # Default fallback
+            print(f"❌ LLM classification failed: {e}")
+            return "internet_data"  # Safer default for unknown queries

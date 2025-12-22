@@ -164,39 +164,6 @@ Since you cannot safely calculate the stock's percentage return (due to buy/sell
 
 -----
 
-### **The Gold Standard SQL Query**
-
-```sql
-WITH portfolio_stats AS (
-    SELECT 
-        portfolio_name, 
-        ytd_profit AS portfolio_pnl, 
-        ytd_return AS portfolio_return_pct -- Include for context, even if comparing PnL
-    FROM ai_trading.portfolio_summary
-    WHERE portfolio_name = 'A-Balanced'
-      AND datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_summary WHERE portfolio_name = 'A-Balanced')
-),
-stock_stats AS (
-    SELECT 
-        symbol, 
-        ytd_total_pnl AS stock_pnl, 
-        market_value AS stock_current_value
-    FROM ai_trading.portfolio_holdings_realized_pnl
-    WHERE symbol = 'QQQ'
-      -- Important: Sum across all portfolios if the user owns QQQ in multiple places
-      -- Or filter by specific portfolio if implied. Here we assume aggregate holding.
-      AND datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_holdings_realized_pnl)
-)
-SELECT 
-    p.portfolio_name,
-    p.portfolio_pnl,
-    s.symbol,
-    s.stock_pnl,
-    (p.portfolio_pnl - s.stock_pnl) AS pnl_difference
-FROM portfolio_stats p
-CROSS JOIN stock_stats s;
-```
-
 ### **User Question:**
 
 {{query}}
@@ -542,21 +509,23 @@ Matching Symbol:"""
         Returns:
             Natural language explanation
         """
-        results_text = results_df.to_string(index=False) if results_df is not None and not results_df.empty else "No results"
+        results_text = results_df.to_string(index=False) if results_df is not None and not results_df.empty else "No results found"
 
         explain_prompt = PromptTemplate(
-            input_variables=["query", "sql", "results"],
+            input_variables=["query", "results"],
             template="""You are a helpful assistant explaining database query results for financial trading data.
 
 User Question: {query}
 
-SQL Query: {sql}
-
-Results:
+Data Results:
 {results}
 
-Provide a clear, concise explanation of the results in natural language.
-Focus on answering the user's question directly with specific numbers and insights."""
+Instructions:
+- Provide a clear, concise explanation of the results in natural language
+- Focus on answering the user's question directly with specific numbers and insights
+- If there are no results, simply say no data was found - do NOT suggest SQL queries or code
+- Do NOT write any SQL queries or code in your response
+- Only explain the data that is shown above"""
         )
 
         explain_chain = explain_prompt | self.explanation_llm | StrOutputParser()
@@ -567,7 +536,6 @@ Focus on answering the user's question directly with specific numbers and insigh
 
             explanation = explain_chain.invoke({
                 "query": query,
-                "sql": sql_query,
                 "results": results_text
             })
 
