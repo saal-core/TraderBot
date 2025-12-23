@@ -4,7 +4,7 @@ from langchain_community.llms import Ollama
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from src.config.settings import get_ollama_config, get_openai_config
+from src.config.settings import get_ollama_config, get_openai_config, get_qwen_config
 from src.services.chat_memory import ChatMemory
 from src.services.portfolio_alias_resolver import PortfolioAliasResolver
 import os
@@ -53,12 +53,14 @@ class DatabaseQueryHandler:
                 temperature=self.temperature
             )
 
-        # Always use Ollama for explanations
-        ollama_config = get_ollama_config()
-        self.explanation_llm = Ollama(
-            model=ollama_config["model_name"],
-            base_url=ollama_config["base_url"],
-            temperature=ollama_config["temperature_greeting"]  # Use moderate temperature for explanations
+        # Use QWEN (H100) for explanations - faster than local Ollama
+        qwen_config = get_qwen_config()
+        self.explanation_llm = ChatOpenAI(
+            model="Qwen3-30B-A3B",
+            base_url=qwen_config["base_url"],
+            api_key=qwen_config["api_key"],
+            temperature=0.3,
+            max_retries=2
         )
 
         # Initialize alias resolver for privacy-preserving placeholder generation
@@ -523,8 +525,8 @@ Matching Symbol:"""
 
     def explain_results(self, query: str, results_df, sql_query: str) -> str:
         """
-        Generate a natural language explanation of query results
-        Uses Ollama for explanations regardless of SQL generation model
+        Generate a natural language explanation of query results.
+        Uses QWEN (H100) for faster explanations.
 
         Args:
             query: Original user question
@@ -567,7 +569,7 @@ Interpret and explain the data **from the user's perspective**. Your job is to a
 
         try:
             start_time = time.time()
-            print(f"⏱️  Starting: Results Explanation Generation...")
+            print(f"⏱️  [QWEN H100] Starting: Results Explanation Generation...")
 
             explanation = explain_chain.invoke({
                 "query": query,

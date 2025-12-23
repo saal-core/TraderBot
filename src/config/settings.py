@@ -106,6 +106,21 @@ def get_fmp_config() -> Dict[str, Any]:
     }
 
 
+def get_qwen_config() -> Dict[str, Any]:
+    """
+    Get QWEN configuration as a dictionary (H100 via OpenAI-compatible API)
+
+    Returns:
+        Dictionary containing QWEN configuration
+    """
+    return {
+        "base_url": os.getenv("QWEN_BASE_URL", "http://192.168.71.72:8080/v1"),
+        "api_key": os.getenv("QWEN_API_KEY", "123"),
+        "model_name": os.getenv("QWEN_MODEL", "qwen3-30b-3b"),
+        "temperature": float(os.getenv("QWEN_TEMPERATURE", "0.3")),
+    }
+
+
 def get_vanna_config() -> Dict[str, Any]:
     return {
         "model": os.getenv("OLLAMA_MODEL"),
