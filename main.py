@@ -14,7 +14,7 @@ from datetime import datetime
 # Import configuration and custom modules
 from src.config.settings import get_app_config, get_ollama_config, get_postgres_config
 from src.services.sql_utilities import PostgreSQLExecutor
-from src.services.query_router import QueryRouter
+from src.services.gpt_oss_query_router import GPTOSSQueryRouter
 from src.services.database_handler import DatabaseQueryHandler
 from src.services.greating_handler import GreetingHandler
 from src.services.chat_memory import ChatMemory
@@ -194,7 +194,7 @@ def initialize_handlers():
             st.success(message)
 
             # Initialize handlers
-            st.session_state.router = QueryRouter(sql_executor=st.session_state.sql_executor)
+            st.session_state.router = GPTOSSQueryRouter(sql_executor=st.session_state.sql_executor)
             st.session_state.db_handler = DatabaseQueryHandler(sql_executor=st.session_state.sql_executor)
             st.session_state.greeting_handler = GreetingHandler()
             st.session_state.internet_data_handler = InternetDataHandler()

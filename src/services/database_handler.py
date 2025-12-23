@@ -512,20 +512,30 @@ Matching Symbol:"""
         results_text = results_df.to_string(index=False) if results_df is not None and not results_df.empty else "No results found"
 
         explain_prompt = PromptTemplate(
-            input_variables=["query", "results"],
-            template="""You are a helpful assistant explaining database query results for financial trading data.
+            input_variables=["query", "results", "sql_query"],
+            template="""You are a financial portfolio assistant interpreting data for users.
 
-User Question: {query}
+**User Question:** {query}
 
-Data Results:
+**Context (SQL Query Used):**
+{sql_query}
+
+**Retrieved Data:**
 {results}
 
-Instructions:
-- Provide a clear, concise explanation of the results in natural language
-- Focus on answering the user's question directly with specific numbers and insights
-- If there are no results, simply say no data was found - do NOT suggest SQL queries or code
-- Do NOT write any SQL queries or code in your response
-- Only explain the data that is shown above"""
+**Your Role:**
+Interpret and explain the data **from the user's perspective**. Your job is to answer their question directly, not describe the data structure.
+
+**Rules:**
+1. **Answer the question directly** - Focus on what the user asked, not on how the data is structured
+2. **Never mention data rows, columns, or table structures** - Speak as if you're a financial advisor explaining insights
+3. **Use specific numbers and names** - Reference actual values from the data (portfolio names, amounts, percentages)
+4. **Be conversational and helpful** - The user doesn't need to know about databases or queries
+5. **If no results found** - Simply say the information wasn't found, don't suggest technical solutions
+6. **Format nicely** - Use bullet points or brief paragraphs for clarity when appropriate
+7. **No code or SQL** - Never include code, SQL, or technical syntax in your response
+
+**Response:**"""
         )
 
         explain_chain = explain_prompt | self.explanation_llm | StrOutputParser()
@@ -536,7 +546,8 @@ Instructions:
 
             explanation = explain_chain.invoke({
                 "query": query,
-                "results": results_text
+                "results": results_text,
+                "sql_query": sql_query
             })
 
             elapsed = time.time() - start_time

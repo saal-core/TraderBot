@@ -33,6 +33,13 @@ class InternetDataHandler:
             temperature=0.2
         )
 
+        # Initialize explainer LLM (can use same model but with different temperature)
+        self.explanation_llm = Ollama(
+            model="gpt-oss:20b",  # Use gpt-oss for better explanations
+            base_url=ollama_config["base_url"],
+            temperature=0.3
+        )
+
         # Symbol name mapping for common companies
         self.company_to_symbol = {
             "apple": "AAPL",
@@ -817,10 +824,67 @@ You can also ask about current prices, market performance, or other financial da
             elapsed = time.time() - start_time
             print(f"✅ Completed: Internet Data Fetch in {elapsed:.2f}s")
 
-            return response
+            # Pass the raw response through the explainer for better interpretation
+            explained_response = self.explain_internet_data(user_query, response)
+            return explained_response
 
         except Exception as e:
             print(f"❌ Error fetching internet data: {e}")
             import traceback
             traceback.print_exc()
             return f"I encountered an error while fetching that information: {str(e)}"
+
+    def explain_internet_data(self, query: str, raw_data: str) -> str:
+        """
+        Generate a natural language explanation of internet data from the user's perspective.
+
+        Args:
+            query: Original user question
+            raw_data: The raw data/response fetched from internet sources
+
+        Returns:
+            Natural language explanation interpreted for the user
+        """
+        explain_prompt = PromptTemplate(
+            input_variables=["query", "data"],
+            template="""You are a financial analyst interpreting real-time market data for users.
+
+**User Question:** {query}
+
+**Retrieved Data:**
+{data}
+
+**Your Role:**
+Interpret and explain the data **from the user's perspective**. Your job is to answer their question directly and provide helpful insights.
+
+**Rules:**
+1. **Answer the question directly** - Focus on what the user asked
+2. **Be conversational and helpful** - Speak like a knowledgeable financial advisor
+3. **Use specific numbers** - Reference actual values, prices, and percentages from the data
+4. **Add brief insights when relevant** - If there's something notable (big gain/loss, trend, news impact), mention it
+5. **Format nicely** - Use bullet points or brief paragraphs for clarity when appropriate
+6. **Keep it concise** - Don't repeat all the raw data, summarize the key points
+7. **If data is missing or incomplete** - Acknowledge it naturally without being overly technical
+
+**Response:**"""
+        )
+
+        explain_chain = explain_prompt | self.explanation_llm | StrOutputParser()
+
+        try:
+            start_time = time.time()
+            print(f"⏱️  Starting: Internet Data Explanation...")
+
+            explanation = explain_chain.invoke({
+                "query": query,
+                "data": raw_data
+            })
+
+            elapsed = time.time() - start_time
+            print(f"✅ Completed: Internet Data Explanation in {elapsed:.2f}s")
+
+            return explanation.strip()
+        except Exception as e:
+            print(f"❌ Error explaining internet data: {e}")
+            # Fallback to returning the raw data if explanation fails
+            return raw_data
