@@ -1,7 +1,7 @@
 """Translation service using Ollama LLM."""
 import logging
 from typing import List, Dict
-from services.ollama_service import OllamaService
+from infrastructure.llm import OllamaAdapter
 from config.prompts import TRANSLATION_SYSTEM_PROMPT
 
 
@@ -10,7 +10,7 @@ class TranslationService:
 
     def __init__(self):
         """Initialize translation service."""
-        self.ollama = OllamaService()
+        self.ollama = OllamaAdapter()
 
     def translate(self, text: str, target_language: str) -> str:
         """

@@ -1,4 +1,7 @@
-"""Vanna AI service for text-to-SQL portfolio queries."""
+"""Vanna AI service for text-to-SQL portfolio queries.
+
+Implements the PortfolioRepository interface for the new architecture.
+"""
 import logging
 from typing import Optional, Dict, Any
 import pandas as pd
@@ -6,7 +9,8 @@ from vanna.ollama import Ollama
 from vanna.chromadb import ChromaDB_VectorStore
 from config.settings import get_settings
 from config.prompts import VANNA_EXPLANATION_PROMPT
-from services.ollama_service import OllamaService
+from infrastructure.llm import OllamaAdapter
+from domain.result import Result, ErrorCode
 
 settings = get_settings()
 
@@ -37,7 +41,7 @@ class VannaService:
     def __init__(self):
         """Initialize Vanna service."""
         self.vn = MyVanna()
-        self.ollama = OllamaService()
+        self.ollama = OllamaAdapter()
         self.connected = False
 
     def connect(self) -> bool:
@@ -102,6 +106,39 @@ class VannaService:
         except Exception as e:
             logging.error(f"Error executing SQL: {e}")
             return None
+
+    def execute_query(self, sql: str) -> Result[pd.DataFrame]:
+        """
+        Execute SQL query with Result pattern for error handling.
+        
+        Implements PortfolioRepository interface.
+
+        Args:
+            sql: SQL query to execute
+
+        Returns:
+            Result[pd.DataFrame]: Success with DataFrame or failure with error
+        """
+        if not self.connected:
+            return Result.fail_with(
+                ErrorCode.CONNECTION_FAILED,
+                "Database not connected. Call connect() first."
+            )
+
+        try:
+            result_df = self.vn.run_sql(sql)
+            if result_df is None:
+                return Result.fail_with(
+                    ErrorCode.NO_RESULTS,
+                    "Query returned no results"
+                )
+            return Result.ok(result_df)
+        except Exception as e:
+            logging.error(f"Error executing SQL: {e}")
+            return Result.fail_with(
+                ErrorCode.QUERY_TIMEOUT,
+                f"Query execution failed: {str(e)}"
+            )
 
     def explain_results(
         self,
