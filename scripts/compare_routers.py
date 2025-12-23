@@ -3,8 +3,8 @@
 Router Comparison Script
 
 Compares the accuracy and performance of:
-1. QueryRouter (pattern-matching + LLM fallback)
-2. GPTOSSQueryRouter (pure LLM-based classification)
+1. GPTOSSQueryRouter (pure LLM-based classification) - v1
+2. OptimizedQueryRouter (tiered pattern + LLM fallback) - v2
 
 Usage:
     cd /home/dev/Hussein/TraderBot
@@ -20,8 +20,8 @@ from datetime import datetime
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.services.query_router import QueryRouter
 from src.services.gpt_oss_query_router import GPTOSSQueryRouter
+from src.services.gpt_oss_query_router_v2 import OptimizedQueryRouter
 
 
 # ==============================================================================
@@ -95,67 +95,69 @@ def run_comparison(test_questions: list, sql_executor=None) -> dict:
         print("   Please add questions to TEST_QUESTIONS in scripts/compare_routers.py")
         return {}
 
-    print("=" * 70)
-    print("ROUTER COMPARISON TEST")
-    print("=" * 70)
+    print("=" * 80)
+    print("ROUTER COMPARISON TEST: GPT-OSS v1 vs Optimized v2")
+    print("=" * 80)
     print(f"Total questions: {len(test_questions)}")
     print()
 
     # Initialize routers
     print("Initializing routers...")
-    original_router = QueryRouter(sql_executor=sql_executor)
-    gpt_oss_router = GPTOSSQueryRouter(sql_executor=sql_executor)
+    v1_router = GPTOSSQueryRouter(sql_executor=sql_executor)
+    v2_router = OptimizedQueryRouter(sql_executor=sql_executor)
     print("✅ Routers initialized\n")
 
     # Results storage
     results = []
-    original_correct = 0
-    gpt_oss_correct = 0
-    original_times = []
-    gpt_oss_times = []
+    v1_correct = 0
+    v2_correct = 0
+    v1_times = []
+    v2_times = []
 
     # Run tests
     for i, (question, expected) in enumerate(test_questions, 1):
         print(f"[{i}/{len(test_questions)}] Testing: {question[:60]}...")
         
-        # Test original router
+        # Test v1 router (GPTOSSQueryRouter)
         start = time.time()
-        original_result = original_router.classify_query(question)
-        original_time = time.time() - start
-        original_times.append(original_time)
-        original_match = original_result == expected
-        if original_match:
-            original_correct += 1
+        v1_result = v1_router.classify_query(question)
+        v1_time = time.time() - start
+        v1_times.append(v1_time)
+        v1_match = v1_result == expected
+        if v1_match:
+            v1_correct += 1
 
         # Sleep 5 seconds to give models time for better answers
-        print("   ⏳ Waiting 5 seconds before GPT-OSS...")
+        print("   ⏳ Waiting 5 seconds before v2 router...")
         time.sleep(5)
 
-        # Test GPT-OSS router
+        # Test v2 router (OptimizedQueryRouter)
         start = time.time()
-        gpt_oss_result = gpt_oss_router.classify_query(question)
-        gpt_oss_time = time.time() - start
-        gpt_oss_times.append(gpt_oss_time)
-        gpt_oss_match = gpt_oss_result == expected
-        if gpt_oss_match:
-            gpt_oss_correct += 1
+        v2_result = v2_router.classify_query(question)
+        v2_time = time.time() - start
+        v2_times.append(v2_time)
+        v2_match = v2_result == expected
+        if v2_match:
+            v2_correct += 1
 
         # Store result
         results.append({
             "question": question,
             "expected": expected,
-            "original_result": original_result,
-            "original_correct": original_match,
-            "original_time": original_time,
-            "gpt_oss_result": gpt_oss_result,
-            "gpt_oss_correct": gpt_oss_match,
-            "gpt_oss_time": gpt_oss_time,
+            "v1_result": v1_result,
+            "v1_correct": v1_match,
+            "v1_time_sec": round(v1_time, 3),
+            "v2_result": v2_result,
+            "v2_correct": v2_match,
+            "v2_time_sec": round(v2_time, 3),
         })
 
-        # Print inline result
-        orig_status = "✓" if original_match else f"✗ ({original_result})"
-        gpt_status = "✓" if gpt_oss_match else f"✗ ({gpt_oss_result})"
-        print(f"   Expected: {expected} | Original: {orig_status} | GPT-OSS: {gpt_status}")
+        # Print inline result with timing
+        v1_status = "✓" if v1_match else f"✗ ({v1_result})"
+        v2_status = "✓" if v2_match else f"✗ ({v2_result})"
+        print(f"   Expected: {expected}")
+        print(f"   v1 (GPT-OSS):   {v1_status} | Time: {v1_time:.3f}s")
+        print(f"   v2 (Optimized): {v2_status} | Time: {v2_time:.3f}s")
         print()
 
         # Sleep 5 seconds before next question
@@ -165,45 +167,68 @@ def run_comparison(test_questions: list, sql_executor=None) -> dict:
 
     # Calculate metrics
     total = len(test_questions)
-    original_accuracy = (original_correct / total) * 100 if total > 0 else 0
-    gpt_oss_accuracy = (gpt_oss_correct / total) * 100 if total > 0 else 0
+    v1_accuracy = (v1_correct / total) * 100 if total > 0 else 0
+    v2_accuracy = (v2_correct / total) * 100 if total > 0 else 0
     
-    avg_original_time = sum(original_times) / len(original_times) if original_times else 0
-    avg_gpt_oss_time = sum(gpt_oss_times) / len(gpt_oss_times) if gpt_oss_times else 0
+    avg_v1_time = sum(v1_times) / len(v1_times) if v1_times else 0
+    avg_v2_time = sum(v2_times) / len(v2_times) if v2_times else 0
+    
+    min_v1_time = min(v1_times) if v1_times else 0
+    max_v1_time = max(v1_times) if v1_times else 0
+    min_v2_time = min(v2_times) if v2_times else 0
+    max_v2_time = max(v2_times) if v2_times else 0
 
     # Print summary
-    print("=" * 70)
+    print("=" * 80)
     print("SUMMARY")
-    print("=" * 70)
-    print(f"\n{'Metric':<25} {'Original Router':<20} {'GPT-OSS Router':<20}")
+    print("=" * 80)
+    print(f"\n{'Metric':<25} {'GPT-OSS v1':<20} {'Optimized v2':<20}")
     print("-" * 65)
-    print(f"{'Correct':<25} {original_correct}/{total:<18} {gpt_oss_correct}/{total:<18}")
-    print(f"{'Accuracy':<25} {original_accuracy:.1f}%{'':<16} {gpt_oss_accuracy:.1f}%{'':<16}")
-    print(f"{'Avg Time (sec)':<25} {avg_original_time:.3f}{'':<16} {avg_gpt_oss_time:.3f}{'':<16}")
-    print(f"{'Total Time (sec)':<25} {sum(original_times):.2f}{'':<16} {sum(gpt_oss_times):.2f}{'':<16}")
+    print(f"{'Correct':<25} {v1_correct}/{total:<18} {v2_correct}/{total:<18}")
+    print(f"{'Accuracy':<25} {v1_accuracy:.1f}%{'':<17} {v2_accuracy:.1f}%{'':<17}")
+    print(f"{'Avg Time (sec)':<25} {avg_v1_time:.3f}{'':<17} {avg_v2_time:.3f}{'':<17}")
+    print(f"{'Min Time (sec)':<25} {min_v1_time:.3f}{'':<17} {min_v2_time:.3f}{'':<17}")
+    print(f"{'Max Time (sec)':<25} {max_v1_time:.3f}{'':<17} {max_v2_time:.3f}{'':<17}")
+    print(f"{'Total Time (sec)':<25} {sum(v1_times):.2f}{'':<17} {sum(v2_times):.2f}{'':<17}")
     print()
 
     # Winner announcement
-    if original_accuracy > gpt_oss_accuracy:
-        print("🏆 Winner: Original Router (higher accuracy)")
-    elif gpt_oss_accuracy > original_accuracy:
-        print("🏆 Winner: GPT-OSS Router (higher accuracy)")
+    print("=" * 80)
+    print("WINNER DETERMINATION")
+    print("=" * 80)
+    
+    if v1_accuracy > v2_accuracy:
+        print("🏆 Winner: GPT-OSS v1 (higher accuracy)")
+    elif v2_accuracy > v1_accuracy:
+        print("🏆 Winner: Optimized v2 (higher accuracy)")
     else:
-        if avg_original_time < avg_gpt_oss_time:
-            print("🏆 Winner: Original Router (same accuracy, faster)")
-        elif avg_gpt_oss_time < avg_original_time:
-            print("🏆 Winner: GPT-OSS Router (same accuracy, faster)")
+        if avg_v1_time < avg_v2_time:
+            print("🏆 Winner: GPT-OSS v1 (same accuracy, faster)")
+        elif avg_v2_time < avg_v1_time:
+            print("🏆 Winner: Optimized v2 (same accuracy, faster)")
         else:
             print("🏆 Tie: Both routers performed equally")
+    
+    # Speed comparison
+    if avg_v2_time < avg_v1_time:
+        speedup = avg_v1_time / avg_v2_time if avg_v2_time > 0 else 0
+        print(f"\n⚡ Speed: Optimized v2 is {speedup:.1f}x faster than GPT-OSS v1")
+    elif avg_v1_time < avg_v2_time:
+        speedup = avg_v2_time / avg_v1_time if avg_v1_time > 0 else 0
+        print(f"\n⚡ Speed: GPT-OSS v1 is {speedup:.1f}x faster than Optimized v2")
 
     print()
 
     return {
         "results": results,
-        "original_accuracy": original_accuracy,
-        "gpt_oss_accuracy": gpt_oss_accuracy,
-        "original_avg_time": avg_original_time,
-        "gpt_oss_avg_time": avg_gpt_oss_time,
+        "v1_accuracy": v1_accuracy,
+        "v2_accuracy": v2_accuracy,
+        "v1_avg_time": avg_v1_time,
+        "v2_avg_time": avg_v2_time,
+        "v1_min_time": min_v1_time,
+        "v2_min_time": min_v2_time,
+        "v1_max_time": max_v1_time,
+        "v2_max_time": max_v2_time,
     }
 
 
@@ -222,8 +247,8 @@ def save_results_to_csv(comparison_data: dict, output_path: str = None):
     with open(output_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=[
             "question", "expected", 
-            "original_result", "original_correct", "original_time",
-            "gpt_oss_result", "gpt_oss_correct", "gpt_oss_time"
+            "v1_result", "v1_correct", "v1_time_sec",
+            "v2_result", "v2_correct", "v2_time_sec"
         ])
         writer.writeheader()
         writer.writerows(comparison_data["results"])
@@ -246,77 +271,90 @@ def save_results_to_text(comparison_data: dict, output_path: str = None):
     results = comparison_data["results"]
     
     # Separate misclassified questions by method
-    original_wrong = [r for r in results if not r["original_correct"]]
-    gpt_oss_wrong = [r for r in results if not r["gpt_oss_correct"]]
+    v1_wrong = [r for r in results if not r["v1_correct"]]
+    v2_wrong = [r for r in results if not r["v2_correct"]]
 
     with open(output_path, 'w', encoding='utf-8') as f:
-        f.write("=" * 70 + "\n")
-        f.write("QUERY ROUTER COMPARISON REPORT\n")
+        f.write("=" * 80 + "\n")
+        f.write("QUERY ROUTER COMPARISON REPORT: GPT-OSS v1 vs Optimized v2\n")
         f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write("=" * 70 + "\n\n")
+        f.write("=" * 80 + "\n\n")
 
         # Summary
         total = len(results)
         f.write("SUMMARY\n")
-        f.write("-" * 70 + "\n")
-        f.write(f"Total Questions: {total}\n")
-        f.write(f"Original Router: {total - len(original_wrong)}/{total} correct ({comparison_data['original_accuracy']:.1f}%)\n")
-        f.write(f"GPT-OSS Router:  {total - len(gpt_oss_wrong)}/{total} correct ({comparison_data['gpt_oss_accuracy']:.1f}%)\n")
-        f.write(f"Original Avg Time: {comparison_data['original_avg_time']:.3f}s\n")
-        f.write(f"GPT-OSS Avg Time:  {comparison_data['gpt_oss_avg_time']:.3f}s\n")
+        f.write("-" * 80 + "\n")
+        f.write(f"Total Questions: {total}\n\n")
+        
+        f.write(f"GPT-OSS v1 (Pure LLM):\n")
+        f.write(f"  - Accuracy: {total - len(v1_wrong)}/{total} correct ({comparison_data['v1_accuracy']:.1f}%)\n")
+        f.write(f"  - Avg Time: {comparison_data['v1_avg_time']:.3f}s\n")
+        f.write(f"  - Min Time: {comparison_data['v1_min_time']:.3f}s\n")
+        f.write(f"  - Max Time: {comparison_data['v1_max_time']:.3f}s\n\n")
+        
+        f.write(f"Optimized v2 (Tiered Pattern + LLM):\n")
+        f.write(f"  - Accuracy: {total - len(v2_wrong)}/{total} correct ({comparison_data['v2_accuracy']:.1f}%)\n")
+        f.write(f"  - Avg Time: {comparison_data['v2_avg_time']:.3f}s\n")
+        f.write(f"  - Min Time: {comparison_data['v2_min_time']:.3f}s\n")
+        f.write(f"  - Max Time: {comparison_data['v2_max_time']:.3f}s\n")
         f.write("\n")
 
-        # Original Router Misclassifications
-        f.write("=" * 70 + "\n")
-        f.write(f"ORIGINAL ROUTER - WRONG CLASSIFICATIONS ({len(original_wrong)} errors)\n")
-        f.write("=" * 70 + "\n")
-        if original_wrong:
-            for i, r in enumerate(original_wrong, 1):
+        # v1 Misclassifications
+        f.write("=" * 80 + "\n")
+        f.write(f"GPT-OSS v1 - WRONG CLASSIFICATIONS ({len(v1_wrong)} errors)\n")
+        f.write("=" * 80 + "\n")
+        if v1_wrong:
+            for i, r in enumerate(v1_wrong, 1):
                 f.write(f"\n{i}. Question: {r['question']}\n")
                 f.write(f"   Expected: {r['expected']}\n")
-                f.write(f"   Got:      {r['original_result']}\n")
+                f.write(f"   Got:      {r['v1_result']}\n")
+                f.write(f"   Time:     {r['v1_time_sec']:.3f}s\n")
         else:
             f.write("\nNo misclassifications! ✓\n")
         f.write("\n")
 
-        # GPT-OSS Router Misclassifications
-        f.write("=" * 70 + "\n")
-        f.write(f"GPT-OSS ROUTER - WRONG CLASSIFICATIONS ({len(gpt_oss_wrong)} errors)\n")
-        f.write("=" * 70 + "\n")
-        if gpt_oss_wrong:
-            for i, r in enumerate(gpt_oss_wrong, 1):
+        # v2 Misclassifications
+        f.write("=" * 80 + "\n")
+        f.write(f"Optimized v2 - WRONG CLASSIFICATIONS ({len(v2_wrong)} errors)\n")
+        f.write("=" * 80 + "\n")
+        if v2_wrong:
+            for i, r in enumerate(v2_wrong, 1):
                 f.write(f"\n{i}. Question: {r['question']}\n")
                 f.write(f"   Expected: {r['expected']}\n")
-                f.write(f"   Got:      {r['gpt_oss_result']}\n")
+                f.write(f"   Got:      {r['v2_result']}\n")
+                f.write(f"   Time:     {r['v2_time_sec']:.3f}s\n")
         else:
             f.write("\nNo misclassifications! ✓\n")
         f.write("\n")
 
         # Full Results Table
-        f.write("=" * 70 + "\n")
-        f.write("FULL RESULTS\n")
-        f.write("=" * 70 + "\n\n")
+        f.write("=" * 80 + "\n")
+        f.write("FULL RESULTS WITH TIMING\n")
+        f.write("=" * 80 + "\n\n")
         for i, r in enumerate(results, 1):
-            orig_mark = "✓" if r["original_correct"] else "✗"
-            gpt_mark = "✓" if r["gpt_oss_correct"] else "✗"
-            f.write(f"{i}. {r['question'][:60]}...\n")
-            f.write(f"   Expected: {r['expected']} | Original: {orig_mark} {r['original_result']} | GPT-OSS: {gpt_mark} {r['gpt_oss_result']}\n\n")
+            v1_mark = "✓" if r["v1_correct"] else "✗"
+            v2_mark = "✓" if r["v2_correct"] else "✗"
+            f.write(f"{i}. {r['question'][:70]}...\n")
+            f.write(f"   Expected: {r['expected']}\n")
+            f.write(f"   v1: {v1_mark} {r['v1_result']} ({r['v1_time_sec']:.3f}s)\n")
+            f.write(f"   v2: {v2_mark} {r['v2_result']} ({r['v2_time_sec']:.3f}s)\n\n")
 
     print(f"📄 Text report saved to: {output_path}")
 
 
 def main():
     """Main entry point"""
-    print("\n" + "=" * 70)
+    print("\n" + "=" * 80)
     print("QUERY ROUTER COMPARISON TOOL")
+    print("GPT-OSS v1 (Pure LLM) vs Optimized v2 (Tiered Pattern + LLM)")
     print(f"Run at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("=" * 70 + "\n")
+    print("=" * 80 + "\n")
 
     # Check if test questions exist
     if not TEST_QUESTIONS:
-        print("=" * 70)
+        print("=" * 80)
         print("NO TEST QUESTIONS CONFIGURED")
-        print("=" * 70)
+        print("=" * 80)
         print("""
 Please add your test questions to the TEST_QUESTIONS list in this file.
 
