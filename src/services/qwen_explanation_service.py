@@ -10,6 +10,7 @@ from typing import Dict, Any
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from src.config.prompts import DATABASE_EXPLANATION_PROMPT
 import os
 from dotenv import load_dotenv
 
@@ -55,32 +56,10 @@ class QwenExplanationService:
                 temperature=0,
                 max_retries=2
             )
-        # Explanation prompt (same as database_handler)
+        # Explanation prompt (from centralized prompts.py)
         self.explain_prompt = PromptTemplate(
             input_variables=["query", "results", "sql_query"],
-            template="""You are a financial portfolio assistant interpreting data for users.
-
-**User Question:** {query}
-
-**Context (SQL Query Used):**
-{sql_query}
-
-**Retrieved Data:**
-{results}
-
-**Your Role:**
-Interpret and explain the data **from the user's perspective**. Your job is to answer their question directly, not describe the data structure.
-
-**Rules:**
-1. **Answer the question directly** - Focus on what the user asked, not on how the data is structured
-2. **Never mention data rows, columns, or table structures** - Speak as if you're a financial advisor explaining insights
-3. **Use specific numbers and names** - Reference actual values from the data (portfolio names, amounts, percentages)
-4. **Be conversational and helpful** - The user doesn't need to know about databases or queries
-5. **If no results found** - Simply say the information wasn't found, don't suggest technical solutions
-6. **Format nicely** - Use bullet points or brief paragraphs for clarity when appropriate
-7. **No code or SQL** - Never include code, SQL, or technical syntax in your response
-
-**Response:**"""
+            template=DATABASE_EXPLANATION_PROMPT
         )
         
         self.explain_chain = self.explain_prompt | self.llm | StrOutputParser()

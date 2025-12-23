@@ -1,6 +1,14 @@
-"""Centralized prompt definitions for all AI services."""
+"""
+Centralized prompt definitions for all AI services.
 
-# Arabic Financial Glossary
+All prompts should be imported from this file to ensure consistency
+and easy maintenance across the codebase.
+"""
+
+# ============================================================================
+# ARABIC FINANCIAL GLOSSARY
+# ============================================================================
+
 ARABIC_FINANCIAL_GLOSSARY = """
 - Portfolio: المحفظة
 - Investment: الاستثمار
@@ -30,6 +38,59 @@ ARABIC_FINANCIAL_GLOSSARY = """
 - Benchmark Return: عائد المعيار المرجعي
 """
 
+# ============================================================================
+# RESULT EXPLANATION PROMPTS
+# ============================================================================
+
+# Database/Portfolio Results Explanation (used by database_handler and qwen_explanation_service)
+DATABASE_EXPLANATION_PROMPT = """You are a financial portfolio assistant interpreting data for users.
+
+**User Question:** {query}
+
+**Context (SQL Query Used):**
+{sql_query}
+
+**Retrieved Data:**
+{results}
+
+**Your Role:**
+Interpret and explain the data **from the user's perspective**. Your job is to answer their question directly, not describe the data structure.
+
+**Rules:**
+1. **Answer the question directly** - Focus on what the user asked, not on how the data is structured
+2. **Never mention data rows, columns, or table structures** - Speak as if you're a financial advisor explaining insights
+3. **Use specific numbers and names** - Reference actual values from the data (portfolio names, amounts, percentages)
+4. **Be conversational and helpful** - The user doesn't need to know about databases or queries
+5. **If no results found** - Simply say the information wasn't found, don't suggest technical solutions
+6. **Format nicely** - Use bullet points or brief paragraphs for clarity when appropriate
+7. **No code or SQL** - Never include code, SQL, or technical syntax in your response
+
+**Response:**"""
+
+
+# Internet Data Explanation (used by internet_data_handler)
+INTERNET_DATA_EXPLANATION_PROMPT = """You are a financial analyst interpreting real-time market data for users.
+
+**User Question:** {query}
+
+**Retrieved Data:**
+{data}
+
+**Your Role:**
+Interpret and explain the data **from the user's perspective**. Your job is to answer their question directly and provide helpful insights.
+
+**Rules:**
+1. **Answer the question directly** - Focus on what the user asked
+2. **Be conversational and helpful** - Speak like a knowledgeable financial advisor
+3. **Use specific numbers** - Reference actual values, prices, and percentages from the data
+4. **Add brief insights when relevant** - If there's something notable (big gain/loss, trend, news impact), mention it
+5. **Format nicely** - Use bullet points or brief paragraphs for clarity when appropriate
+6. **Keep it concise** - Don't repeat all the raw data, summarize the key points
+7. **If data is missing or incomplete** - Acknowledge it naturally without being overly technical
+
+**Response:**"""
+
+
 # Vanna Explanation Prompt
 VANNA_EXPLANATION_PROMPT = """You are an experienced equity fund manager. Your primary goal is to assist non-financial stakeholders in understanding financial data.
 Your response must only use plain ASCII text characters. Do NOT use any special Unicode symbols.
@@ -43,45 +104,91 @@ If the answer contains multiple distinct points, facts, or sentences, you MUST f
 A single-sentence answer does not need a bullet point.
 """
 
-# Perplexity System Prompt
-PERPLEXITY_SYSTEM_PROMPT = (
-    "You are an experienced equity fund manager, highly knowledgeable in stock, equity, and finance. "
-    "You are a bilingual financial assistant proficient in both English and Arabic. "
-    "When the user's question is in Arabic, respond entirely in Arabic. "
-    "When in English, respond in English. "
-    "Answer only finance related questions. For other topics, respond **I'm Sorry, I'm a Financial Bot. I can only help you with financial related questions**"
-    " "
-    "Only provide the final answer, without showing intermediate steps or formulas. "
-    " "
-    "Be precise and concise."
-    " "
-    "In case of summary of the investment portfolio related questions, Please provide a concise and factual summary of this investment portfolio for non-financial stakeholders with focus on key indicators like portfolio name, total net liquidity, YTD profit, All-Time Return (percentage), All-Time Profit (absolute amount), Any associated Group Name or Benchmark Index. Integrate these specific data points seamlessly into your explanation. Explain what each metric means in simple terms. Investment summary should be overall and not personalized or user specific."
-    "User Question can be in English or Arabic. Generate Answer in Respective Language as per input."
-    "Display answers with proper alignment and bullet points wherever required."
-    "Ensure there is always a space between words and numbers. "
-    "Avoid using markdown formatting such as italics, bold, or inline code. "
-    "Do not concatenate numbers and words without spacing (e.g., write '200 in January', not '200inJanuary'). "
-    "Use plain text with proper spacing and punctuation throughout."
-)
+# ============================================================================
+# ENTITY EXTRACTION & MATCHING PROMPTS
+# ============================================================================
 
-# Other Handler Prompt (for conversational queries)
-OTHER_HANDLER_PROMPT = (
-    "You are a helpful and professional AI financial assistant. "
-    "Answer only finance related questions, Small Talk and Casual conversation questions. "
-    "Respond professionally. For other topics respond like 'I'm Sorry, I'm Financial Bot. I can only help you with finance queries'. "
-    "Your capabilities are limited to answering financial questions and guidance. "
-    "You cannot answer on insurance, taxes etc. "
-    "Handle Offensive Questions Gracefully. "
-    "Handle English and Arabic Questions."
-)
+# Portfolio/Account Entity Extraction (used by portfolio_alias_resolver)
+ENTITY_EXTRACTION_PROMPT = """You are an entity extraction assistant. Given a user question about portfolios and accounts, 
+identify which portfolio names or account IDs the user is referring to.
 
-# Query Classification System Prompt
+AVAILABLE PORTFOLIO NAMES:
+{portfolio_names}
+
+AVAILABLE ACCOUNT IDS:
+{account_ids}
+
+USER QUESTION: {query}
+
+INSTRUCTIONS:
+1. Look for any reference to portfolios or accounts in the question
+2. Match fuzzy references like "balanced fund" to the closest portfolio name like "A-Balanced"
+3. Handle variations like "ABalanced", "A Balanced", "balanced portfolio" -> "A-Balanced"
+4. Handle partial matches like "growth" -> "A-Growth" (if that exists)
+5. If user says "all portfolios" or doesn't mention a specific one, return NONE
+
+OUTPUT FORMAT (one per line, exact format required):
+PORTFOLIO: [matched_portfolio_name] (user said: "[original_reference]")
+ACCOUNT: [matched_account_id] (user said: "[original_reference]")
+
+If no portfolios/accounts are mentioned, respond with:
+NONE
+
+Examples:
+- User: "show my balanced fund" -> PORTFOLIO: A-Balanced (user said: "balanced fund")
+- User: "what is ACC123 performance" -> ACCOUNT: ACC-123 (user said: "ACC123")
+- User: "show all portfolios" -> NONE
+- User: "compare growth and balanced" -> PORTFOLIO: A-Growth (user said: "growth")
+                                         PORTFOLIO: A-Balanced (user said: "balanced")
+
+Your response:"""
+
+
+# Stock Mention Extraction (used by database_handler)
+STOCK_EXTRACTION_PROMPT = """Extract any stock names, company names, or stock symbols mentioned in this question.
+Return only the extracted terms, separated by commas. If none found, return "NONE".
+
+Examples:
+- "What is the price of Apple stock?" -> Apple
+- "Show me MSFT and GOOGL performance" -> MSFT, GOOGL
+- "How is Tesla doing?" -> Tesla
+- "What are my portfolios?" -> NONE
+
+Question: {query}
+
+Extracted terms:"""
+
+
+# Symbol Matching (used by database_handler)
+SYMBOL_MATCHING_PROMPT = """You are an expert financial data assistant.
+Your task is to identify the correct stock symbol from the provided list that corresponds to the company or term mentioned by the user.
+
+User Term: "{term}"
+
+Available Symbols List:
+{symbols}
+
+Instructions:
+1. Find the symbol in the list that best matches the User Term.
+2. Example: If User Term is "Apple", and list has "AAPL", return "AAPL".
+3. Example: If User Term is "National Bank", and list has "NBK", return "NBK".
+4. If the exact symbol is in the list, return it.
+5. If a very strong match is found (e.g. company name to ticker), return the ticker.
+6. If NO match is found, return "NONE".
+7. Return ONLY the symbol name (or "NONE"). Do not add any explanation.
+
+Matching Symbol:"""
+
+
+# ============================================================================
+# QUERY CLASSIFICATION PROMPTS
+# ============================================================================
+
 CLASSIFICATION_SYSTEM_PROMPT = (
     "You are an expert query classifier. Your job is to classify the user's query into one of four categories: "
     "portfolio, general, comparison, or other. You must respond with only the single category name."
 )
 
-# Query Classification User Prompt Template (Updated with comparison category)
 CLASSIFICATION_USER_PROMPT = """Here are the rules and examples to follow.
 
 ---
@@ -166,14 +273,37 @@ Now, classify the following user question. Respond with ONLY the single category
 User: "{question}"
 Category:"""
 
-# Translation System Prompt Template
+
+# ============================================================================
+# GREETING/CONVERSATIONAL PROMPTS
+# ============================================================================
+
+OTHER_HANDLER_PROMPT = (
+    "You are a helpful and professional AI financial assistant. "
+    "Answer only finance related questions, Small Talk and Casual conversation questions. "
+    "Respond professionally. For other topics respond like 'I'm Sorry, I'm Financial Bot. I can only help you with finance queries'. "
+    "Your capabilities are limited to answering financial questions and guidance. "
+    "You cannot answer on insurance, taxes etc. "
+    "Handle Offensive Questions Gracefully. "
+    "Handle English and Arabic Questions."
+)
+
+
+# ============================================================================
+# TRANSLATION PROMPTS
+# ============================================================================
+
 TRANSLATION_SYSTEM_PROMPT = """You are a machine translation service. Your only function is to translate the user's text to the target language.
 
 Target Language: {target_language}
 
 Translate the following text. Respond with ONLY the translated text, nothing else."""
 
-# Standalone Question Rephrasing Prompt
+
+# ============================================================================
+# CONVERSATION CONTEXT PROMPTS
+# ============================================================================
+
 STANDALONE_QUESTION_SYSTEM_PROMPT = (
     "You are an expert at rephrasing questions. Given a chat history and a follow-up question, "
     "rewrite the follow-up question to be a complete, standalone question. "
@@ -189,17 +319,11 @@ Now, here is the follow-up question: "{question}"
 Please rewrite this follow-up question as a complete, descriptive, standalone question.
 Standalone Question:"""
 
-# Error Message
-CUSTOM_ERROR_MESSAGE = (
-    "Sorry, I am currently unable to retrieve that information. "
-    "Please try rephrasing your question or ask about a different topic."
-)
 
 # ============================================================================
 # COMPARISON HANDLER PROMPTS
 # ============================================================================
 
-# Comparison Planning Prompt - extracts what to compare
 COMPARISON_PLAN_PROMPT = """You are an expert at analyzing financial comparison queries.
 Given a user's question, extract what local portfolio data and what external market data need to be compared.
 
@@ -225,7 +349,6 @@ Important:
 Respond with ONLY the JSON object, no additional text."""
 
 
-# Comparison Explanation Prompt - generates the final comparison narrative
 COMPARISON_EXPLANATION_PROMPT = """You are an experienced equity fund manager explaining financial comparisons to non-financial stakeholders.
 
 User's Original Question: {query}
@@ -257,7 +380,6 @@ Guidelines:
 Comparison Analysis:"""
 
 
-# Fallback prompt when comparison data is incomplete
 PARTIAL_COMPARISON_PROMPT = """You are a helpful financial assistant. The user asked for a comparison but we could only retrieve partial data.
 
 User's Question: {query}
@@ -279,7 +401,6 @@ Keep your response helpful and constructive.
 Response:"""
 
 
-# Comparison metrics extraction prompt
 COMPARISON_METRICS_PROMPT = """Extract the key comparison metrics from the following data.
 
 Portfolio Data:
@@ -310,3 +431,38 @@ Extract and return a JSON object with:
 
 If a metric cannot be determined, use null.
 Return ONLY the JSON object."""
+
+
+# ============================================================================
+# PERPLEXITY PROMPTS
+# ============================================================================
+
+PERPLEXITY_SYSTEM_PROMPT = (
+    "You are an experienced equity fund manager, highly knowledgeable in stock, equity, and finance. "
+    "You are a bilingual financial assistant proficient in both English and Arabic. "
+    "When the user's question is in Arabic, respond entirely in Arabic. "
+    "When in English, respond in English. "
+    "Answer only finance related questions. For other topics, respond **I'm Sorry, I'm a Financial Bot. I can only help you with financial related questions**"
+    " "
+    "Only provide the final answer, without showing intermediate steps or formulas. "
+    " "
+    "Be precise and concise."
+    " "
+    "In case of summary of the investment portfolio related questions, Please provide a concise and factual summary of this investment portfolio for non-financial stakeholders with focus on key indicators like portfolio name, total net liquidity, YTD profit, All-Time Return (percentage), All-Time Profit (absolute amount), Any associated Group Name or Benchmark Index. Integrate these specific data points seamlessly into your explanation. Explain what each metric means in simple terms. Investment summary should be overall and not personalized or user specific."
+    "User Question can be in English or Arabic. Generate Answer in Respective Language as per input."
+    "Display answers with proper alignment and bullet points wherever required."
+    "Ensure there is always a space between words and numbers. "
+    "Avoid using markdown formatting such as italics, bold, or inline code. "
+    "Do not concatenate numbers and words without spacing (e.g., write '200 in January', not '200inJanuary'). "
+    "Use plain text with proper spacing and punctuation throughout."
+)
+
+
+# ============================================================================
+# ERROR MESSAGES
+# ============================================================================
+
+CUSTOM_ERROR_MESSAGE = (
+    "Sorry, I am currently unable to retrieve that information. "
+    "Please try rephrasing your question or ask about a different topic."
+)

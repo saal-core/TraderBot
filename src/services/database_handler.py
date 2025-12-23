@@ -5,6 +5,11 @@ from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from src.config.settings import get_ollama_config, get_openai_config, get_qwen_config
+from src.config.prompts import (
+    DATABASE_EXPLANATION_PROMPT,
+    STOCK_EXTRACTION_PROMPT,
+    SYMBOL_MATCHING_PROMPT
+)
 from src.services.chat_memory import ChatMemory
 from src.services.portfolio_alias_resolver import PortfolioAliasResolver
 import os
@@ -300,18 +305,7 @@ Since you cannot safely calculate the stock's percentage return (due to buy/sell
         """
         extraction_prompt = PromptTemplate(
             input_variables=["query"],
-            template="""Extract any stock names, company names, or stock symbols mentioned in this question.
-Return only the extracted terms, separated by commas. If none found, return "NONE".
-
-Examples:
-- "What is the price of Apple stock?" -> Apple
-- "Show me MSFT and GOOGL performance" -> MSFT, GOOGL
-- "How is Tesla doing?" -> Tesla
-- "What are my portfolios?" -> NONE
-
-Question: {query}
-
-Extracted terms:"""
+            template=STOCK_EXTRACTION_PROMPT
         )
 
         extraction_chain = extraction_prompt | self.llm | StrOutputParser()
@@ -358,24 +352,7 @@ Extracted terms:"""
         
         match_prompt = PromptTemplate(
             input_variables=["term", "symbols"],
-            template="""You are an expert financial data assistant.
-Your task is to identify the correct stock symbol from the provided list that corresponds to the company or term mentioned by the user.
-
-User Term: "{term}"
-
-Available Symbols List:
-{symbols}
-
-Instructions:
-1. Find the symbol in the list that best matches the User Term.
-2. Example: If User Term is "Apple", and list has "AAPL", return "AAPL".
-3. Example: If User Term is "National Bank", and list has "NBK", return "NBK".
-4. If the exact symbol is in the list, return it.
-5. If a very strong match is found (e.g. company name to ticker), return the ticker.
-6. If NO match is found, return "NONE".
-7. Return ONLY the symbol name (or "NONE"). Do not add any explanation.
-
-Matching Symbol:"""
+            template=SYMBOL_MATCHING_PROMPT
         )
         
         match_chain = match_prompt | self.llm | StrOutputParser()
@@ -540,29 +517,7 @@ Matching Symbol:"""
 
         explain_prompt = PromptTemplate(
             input_variables=["query", "results", "sql_query"],
-            template="""You are a financial portfolio assistant interpreting data for users.
-
-**User Question:** {query}
-
-**Context (SQL Query Used):**
-{sql_query}
-
-**Retrieved Data:**
-{results}
-
-**Your Role:**
-Interpret and explain the data **from the user's perspective**. Your job is to answer their question directly, not describe the data structure.
-
-**Rules:**
-1. **Answer the question directly** - Focus on what the user asked, not on how the data is structured
-2. **Never mention data rows, columns, or table structures** - Speak as if you're a financial advisor explaining insights
-3. **Use specific numbers and names** - Reference actual values from the data (portfolio names, amounts, percentages)
-4. **Be conversational and helpful** - The user doesn't need to know about databases or queries
-5. **If no results found** - Simply say the information wasn't found, don't suggest technical solutions
-6. **Format nicely** - Use bullet points or brief paragraphs for clarity when appropriate
-7. **No code or SQL** - Never include code, SQL, or technical syntax in your response
-
-**Response:**"""
+            template=DATABASE_EXPLANATION_PROMPT
         )
 
         explain_chain = explain_prompt | self.explanation_llm | StrOutputParser()

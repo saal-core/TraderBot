@@ -19,6 +19,7 @@ from langchain_community.llms import Ollama
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from src.config.settings import get_ollama_config
+from src.config.prompts import ENTITY_EXTRACTION_PROMPT
 
 
 @dataclass
@@ -64,39 +65,7 @@ class PortfolioAliasResolver:
         # Entity extraction prompt
         self.extract_prompt = PromptTemplate(
             input_variables=["query", "portfolio_names", "account_ids"],
-            template="""You are an entity extraction assistant. Given a user question about portfolios and accounts, 
-identify which portfolio names or account IDs the user is referring to.
-
-AVAILABLE PORTFOLIO NAMES:
-{portfolio_names}
-
-AVAILABLE ACCOUNT IDS:
-{account_ids}
-
-USER QUESTION: {query}
-
-INSTRUCTIONS:
-1. Look for any reference to portfolios or accounts in the question
-2. Match fuzzy references like "balanced fund" to the closest portfolio name like "A-Balanced"
-3. Handle variations like "ABalanced", "A Balanced", "balanced portfolio" -> "A-Balanced"
-4. Handle partial matches like "growth" -> "A-Growth" (if that exists)
-5. If user says "all portfolios" or doesn't mention a specific one, return NONE
-
-OUTPUT FORMAT (one per line, exact format required):
-PORTFOLIO: [matched_portfolio_name] (user said: "[original_reference]")
-ACCOUNT: [matched_account_id] (user said: "[original_reference]")
-
-If no portfolios/accounts are mentioned, respond with:
-NONE
-
-Examples:
-- User: "show my balanced fund" -> PORTFOLIO: A-Balanced (user said: "balanced fund")
-- User: "what is ACC123 performance" -> ACCOUNT: ACC-123 (user said: "ACC123")
-- User: "show all portfolios" -> NONE
-- User: "compare growth and balanced" -> PORTFOLIO: A-Growth (user said: "growth")
-                                         PORTFOLIO: A-Balanced (user said: "balanced")
-
-Your response:"""
+            template=ENTITY_EXTRACTION_PROMPT
         )
         
         self.extract_chain = self.extract_prompt | self.llm | StrOutputParser()

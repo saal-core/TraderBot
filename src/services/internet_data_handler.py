@@ -9,6 +9,7 @@ from langchain_community.llms import Ollama
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from src.config.settings import get_ollama_config
+from src.config.prompts import INTERNET_DATA_EXPLANATION_PROMPT
 import time
 
 
@@ -847,26 +848,7 @@ You can also ask about current prices, market performance, or other financial da
         """
         explain_prompt = PromptTemplate(
             input_variables=["query", "data"],
-            template="""You are a financial analyst interpreting real-time market data for users.
-
-**User Question:** {query}
-
-**Retrieved Data:**
-{data}
-
-**Your Role:**
-Interpret and explain the data **from the user's perspective**. Your job is to answer their question directly and provide helpful insights.
-
-**Rules:**
-1. **Answer the question directly** - Focus on what the user asked
-2. **Be conversational and helpful** - Speak like a knowledgeable financial advisor
-3. **Use specific numbers** - Reference actual values, prices, and percentages from the data
-4. **Add brief insights when relevant** - If there's something notable (big gain/loss, trend, news impact), mention it
-5. **Format nicely** - Use bullet points or brief paragraphs for clarity when appropriate
-6. **Keep it concise** - Don't repeat all the raw data, summarize the key points
-7. **If data is missing or incomplete** - Acknowledge it naturally without being overly technical
-
-**Response:**"""
+            template=INTERNET_DATA_EXPLANATION_PROMPT
         )
 
         explain_chain = explain_prompt | self.explanation_llm | StrOutputParser()
