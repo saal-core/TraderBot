@@ -6,6 +6,7 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from src.config.settings import get_ollama_config, get_openai_config
 from src.services.chat_memory import ChatMemory
+from src.services.portfolio_alias_resolver import PortfolioAliasResolver
 import os
 import time
 from rapidfuzz import fuzz, process
@@ -60,12 +61,15 @@ class DatabaseQueryHandler:
             temperature=ollama_config["temperature_greeting"]  # Use moderate temperature for explanations
         )
 
+        # Initialize alias resolver for privacy-preserving placeholder generation
+        self.alias_resolver = PortfolioAliasResolver(sql_executor=sql_executor)
+
         # Load custom prompt template
         self.custom_prompt_template = self._load_custom_prompt()
 
         # Create prompt template with dynamic data including conversation history
         self.sql_prompt = PromptTemplate(
-            input_variables=["schema", "portfolio_names", "account_ids", "query", "matched_symbols", "conversation_history"],
+            input_variables=["schema", "entity_placeholders", "query", "matched_symbols", "conversation_history"],
             template=self.custom_prompt_template
         )
 
@@ -103,23 +107,28 @@ use the conversation history to understand the full intent. Otherwise, treat as 
 
 ---
 
-### **6. Available Data (Current State)**
+### **6. Entity Placeholders (Privacy-Preserving)**
 
-**Portfolio Names:**
-{{portfolio_names}}
+**IMPORTANT**: The user's query has been preprocessed. Portfolio names and account IDs are replaced with placeholders.
+Use these placeholders EXACTLY as shown in your SQL WHERE clauses.
 
-**Account IDs:**
-{{account_ids}}
+**Resolved Entities:**
+{{entity_placeholders}}
 
 **Matched Stock Symbols (if any):**
 {{matched_symbols}}
+
+**PLACEHOLDER USAGE RULES:**
+- Use placeholders directly in WHERE clauses: `WHERE portfolio_name = :PORTFOLIO_1`
+- Do NOT wrap placeholders in quotes: Use `:PORTFOLIO_1` not `':PORTFOLIO_1'`
+- If no placeholder is provided, the query is about all portfolios/accounts
+- Placeholders will be substituted with actual values after SQL generation
 
 ---
 
 ### **7. Output Instructions**
 
-- You have only the provided portfolio names and account IDs to reference
-- Match user questions to these names/IDs only even if he asks in a different way
+- Use the placeholders provided above when filtering by portfolio or account
 - Generate ONLY a SELECT query
 - Do not use INSERT, UPDATE, DELETE, or any data modification statements
 - Return only the SQL query without any explanation or markdown
@@ -431,7 +440,12 @@ Matching Symbol:"""
 
     def generate_sql(self, query: str, schema: str, chat_history: List[Dict[str, str]] = None) -> str:
         """
-        Generate SQL query from natural language question with fuzzy stock matching and conversation context
+        Generate SQL query from natural language question with fuzzy stock matching and conversation context.
+        
+        Uses privacy-preserving placeholder approach:
+        1. Resolve portfolio/account references to placeholders using local LLM
+        2. Send placeholders (not actual names) to OpenAI for SQL generation
+        3. Substitute actual values into SQL after generation
 
         Args:
             query: User's natural language question
@@ -439,14 +453,25 @@ Matching Symbol:"""
             chat_history: Previous conversation history for follow-up questions
 
         Returns:
-            Generated SQL query string
+            Generated SQL query string with actual values substituted
         """
         if chat_history is None:
             chat_history = []
 
-        # Get dynamic data from database
-        portfolio_names = self._get_portfolio_names()
-        account_ids = self._get_account_ids()
+        # Phase 1: Resolve entities using local LLM (privacy-preserving)
+        print("🔒 Phase 1: Resolving portfolio/account references locally...")
+        entity_resolution = self.alias_resolver.resolve_entities(query)
+        
+        # Use rewritten query with placeholders
+        rewritten_query = entity_resolution.rewritten_query
+        placeholder_map = entity_resolution.placeholder_map
+        entity_placeholders = entity_resolution.placeholder_info
+        
+        if placeholder_map:
+            print(f"  → Placeholder map: {placeholder_map}")
+            print(f"  → Rewritten query: {rewritten_query}")
+        else:
+            print("  → No specific portfolio/account mentioned")
 
         # Format conversation history for context
         conversation_text = self._format_conversation_history(chat_history)
@@ -462,17 +487,16 @@ Matching Symbol:"""
             matched_symbols = self._fuzzy_match_symbols(mentioned_terms, symbols_dict)
             print(f"  → {matched_symbols}")
 
-        # Invoke the chain with all parameters including conversation history
+        # Phase 2: Generate SQL with placeholders (OpenAI - no actual names exposed)
         start_time = time.time()
-        print(f"⏱️  Starting: SQL Query Generation...")
+        print(f"⏱️  Phase 2: SQL Query Generation (with placeholders)...")
 
         sql = self.sql_chain.invoke({
             "schema": schema,
-            "portfolio_names": portfolio_names,
-            "account_ids": account_ids,
+            "entity_placeholders": entity_placeholders,
             "matched_symbols": matched_symbols,
             "conversation_history": conversation_text,
-            "query": query
+            "query": rewritten_query  # Use rewritten query with placeholders
         })
 
         elapsed = time.time() - start_time
@@ -487,14 +511,15 @@ Matching Symbol:"""
             sql = "\n".join([line for line in lines if not line.startswith("```") and "sql" not in line.lower()])
 
         sql = sql.strip()
-        print(f"  → Generated SQL: {sql}")
-        return sql
+        print(f"  → Generated SQL (with placeholders): {sql}")
 
-        # except Exception as e:
-        #     print(f"Error generating SQL: {e}")
-        #     import traceback
-        #     traceback.print_exc()
-        #     return "ERROR: Failed to generate SQL query"
+        # Phase 3: Substitute placeholders with actual values
+        if placeholder_map:
+            print(f"🔓 Phase 3: Substituting placeholders with actual values...")
+            sql = self.alias_resolver.substitute_placeholders(sql, placeholder_map)
+            print(f"  → Final SQL: {sql}")
+
+        return sql
 
     def explain_results(self, query: str, results_df, sql_query: str) -> str:
         """

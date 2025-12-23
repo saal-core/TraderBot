@@ -21,6 +21,9 @@ from src.services.chat_memory import ChatMemory
 from src.services.internet_data_handler import InternetDataHandler
 from src.services.comparison_handler import ComparisonHandler
 
+import warnings 
+warnings.filterwarnings("ignore")
+
 from dotenv import load_dotenv
 load_dotenv()
 
