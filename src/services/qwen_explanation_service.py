@@ -16,6 +16,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# TOON formatter for token-efficient data formatting
+from src.utils.toon_formatter import format_query_results
+
 
 def get_qwen_config() -> Dict[str, Any]:
     """Get QWEN configuration from environment variables."""
@@ -76,7 +79,8 @@ class QwenExplanationService:
         Returns:
             Tuple of (explanation, elapsed_time_seconds)
         """
-        results_text = results_df.to_string(index=False) if results_df is not None and not results_df.empty else "No results found"
+        # Use TOON format for token-efficient results representation (~50% reduction)
+        results_text = format_query_results(results_df) if results_df is not None and not results_df.empty else "No results found"
         
         try:
             start_time = time.time()

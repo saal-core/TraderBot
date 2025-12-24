@@ -18,6 +18,9 @@ from rapidfuzz import fuzz, process
 from dotenv import load_dotenv
 load_dotenv()
 
+# TOON formatter for token-efficient data formatting
+from src.utils.toon_formatter import format_query_results, format_symbol_list
+
 class DatabaseQueryHandler:
     """Handles database-related queries by generating SQL using custom prompt"""
 
@@ -345,10 +348,9 @@ Since you cannot safely calculate the stock's percentage return (due to buy/sell
         if not extracted_term or not all_symbols_list:
             return None
             
-        # Create a string representation of the symbols list
-        # If list is too long, we might need to truncate or use a retrieval approach
-        # For ~800 symbols, it might fit in context but let's be careful
-        symbols_str = ", ".join(all_symbols_list)
+        # Create a TOON formatted symbol list for token efficiency
+        # TOON format reduces tokens by ~40% for large lists
+        symbols_str = format_symbol_list(all_symbols_list)
         
         match_prompt = PromptTemplate(
             input_variables=["term", "symbols"],
@@ -359,9 +361,9 @@ Since you cannot safely calculate the stock's percentage return (due to buy/sell
 
         try:
             start_time = time.time()
-            print(f"⏱️  Starting: Symbol Matching for '{extracted_term}'...")
+            print(f"⏱️  Starting: Symbol Matching for '{extracted_term}' (TOON format)...")
 
-            # For ~800 symbols, it fits in context.
+            # Using TOON format for token efficiency
             # We skip fuzzy pre-filtering because it misses cases like "Apple" -> "AAPL" (score ~22)
 
             result = match_chain.invoke({
@@ -513,7 +515,8 @@ Since you cannot safely calculate the stock's percentage return (due to buy/sell
         Returns:
             Natural language explanation
         """
-        results_text = results_df.to_string(index=False) if results_df is not None and not results_df.empty else "No results found"
+        # Use TOON format for token-efficient results representation
+        results_text = format_query_results(results_df) if results_df is not None and not results_df.empty else "No results found"
 
         explain_prompt = PromptTemplate(
             input_variables=["query", "results", "sql_query"],

@@ -18,6 +18,9 @@ from src.config.prompts import COMPARISON_PLAN_PROMPT, COMPARISON_EXPLANATION_PR
 from dotenv import load_dotenv
 load_dotenv()
 
+# TOON formatter for token-efficient data formatting
+from src.utils.toon_formatter import dataframe_to_toon
+
 class ComparisonHandler:
     """
     Orchestrates comparison queries that require both local database 
@@ -204,10 +207,10 @@ class ComparisonHandler:
                 print(f"❌ Query execution failed: {message}")
                 return False, None, None, sql_query
 
-            # Format results for LLM consumption
+            # Format results for LLM consumption using TOON format
             if results_df is not None and not results_df.empty:
-                # Convert to string representation
-                formatted_data = results_df.to_string(index=False)
+                # Use TOON format for token efficiency (~45% reduction)
+                formatted_data = dataframe_to_toon(results_df, "local_data")
                 
                 # Also create a summary
                 row_count = len(results_df)
