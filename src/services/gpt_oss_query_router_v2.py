@@ -57,6 +57,36 @@ class OptimizedQueryRouter:
         # Pre-compile regex patterns for speed
         self._compile_patterns()
 
+    def _is_comparison_query(self, query: str) -> bool:
+        """
+        Check if query requires comparing local portfolio data with external market data.
+        Only returns True for queries that EXPLICITLY compare portfolio vs market/benchmark.
+        """
+        query_lower = query.lower()
+    
+        # Must have BOTH portfolio reference AND external benchmark reference
+        portfolio_indicators = [
+            'my portfolio', 'our portfolio', 'portfolio', 
+            'my returns', 'our returns', 'my performance'
+        ]
+        
+        external_indicators = [
+            's&p', 'sp500', 's&p 500', 'nasdaq', 'dow', 'dow jones',
+            'market', 'benchmark', 'index', 'russell'
+        ]
+        
+        comparison_verbs = [
+            'compare', 'vs', 'versus', 'against', 'relative to',
+            'outperform', 'underperform', 'beat', 'how does', 'how do'
+        ]
+        
+        has_portfolio = any(ind in query_lower for ind in portfolio_indicators)
+        has_external = any(ind in query_lower for ind in external_indicators)
+        has_comparison = any(verb in query_lower for verb in comparison_verbs)
+        
+        # Need all three for a true comparison query
+        return has_portfolio and has_external and has_comparison
+
     def _compile_patterns(self):
         """Pre-compile all regex patterns for faster matching."""
         
@@ -385,15 +415,15 @@ Category:"""
     def classify_query(self, query: str) -> str:
         """
         Classify query using tiered approach.
-        
-        Tier 1: Pattern matching (~10ms)
-        Tier 2: Keyword/entity matching (~50ms)
-        Tier 3: LLM fallback (~2-3s)
-        
-        Returns:
-            Category: "database", "internet_data", or "greeting"
+        Now includes comparison detection.
         """
         start_time = time.time()
+        
+        # NEW: Check for comparison FIRST (before other tiers)
+        if self._is_comparison_query(query):
+            elapsed = (time.time() - start_time) * 1000
+            print(f"  → [COMPARISON] Detected comparison query ({elapsed:.1f}ms)")
+            return "comparison"
         
         # Tier 1: Pattern matching
         result = self._tier1_pattern_match(query)

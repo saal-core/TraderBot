@@ -726,11 +726,9 @@ You can also ask about current prices, market performance, or other financial da
             indices_to_fetch.append(("^DJI", "Dow Jones"))
 
         if not indices_to_fetch:
-            # Default to all major indices
+            # Default to S&P 500 (SPX) as the primary benchmark
             indices_to_fetch = [
-                ("^GSPC", "S&P 500"),
-                ("^IXIC", "NASDAQ"),
-                ("^DJI", "Dow Jones"),
+                ("SPX", "S&P 500"),
             ]
 
         response = "**Market Indices**\n\n"
@@ -773,25 +771,25 @@ You can also ask about current prices, market performance, or other financial da
 
         return response
 
-    def fetch_data(self, user_query: str, chat_history: List[Dict[str, str]] = None) -> str:
+    def fetch_raw_data(self, user_query: str, chat_history: List[Dict[str, str]] = None) -> str:
         """
-        Fetch real-time financial data based on user query.
-
-        This is the main entry point that routes to specific handlers.
+        Fetch real-time financial data WITHOUT explanation.
+        Use this when you want to combine the data with other sources before explaining.
+        (e.g., ComparisonHandler uses this to avoid double-explanation)
 
         Args:
             user_query: User's question
             chat_history: Previous conversation for context
 
         Returns:
-            Formatted response with financial data
+            Raw formatted response with financial data (no LLM explanation)
         """
         if chat_history is None:
             chat_history = []
 
         try:
             start_time = time.time()
-            print(f"⏱️  Starting: Internet Data Fetch...")
+            print(f"⏱️  Starting: Internet Data Fetch (raw)...")
 
             # Classify the query type
             query_type = self._classify_query(user_query)
@@ -823,17 +821,40 @@ You can also ask about current prices, market performance, or other financial da
                     response = self._handle_news(user_query)
 
             elapsed = time.time() - start_time
-            print(f"✅ Completed: Internet Data Fetch in {elapsed:.2f}s")
+            print(f"✅ Completed: Internet Data Fetch (raw) in {elapsed:.2f}s")
 
-            # Pass the raw response through the explainer for better interpretation
-            explained_response = self.explain_internet_data(user_query, response)
-            return explained_response
+            # Return raw data WITHOUT explanation
+            return response
 
         except Exception as e:
             print(f"❌ Error fetching internet data: {e}")
             import traceback
             traceback.print_exc()
-            return f"I encountered an error while fetching that information: {str(e)}"
+            return f"Error fetching internet data: {str(e)}"
+
+    def fetch_data(self, user_query: str, chat_history: List[Dict[str, str]] = None) -> str:
+        """
+        Fetch real-time financial data based on user query.
+
+        This is the main entry point that routes to specific handlers.
+        Data is explained by LLM before returning.
+
+        Args:
+            user_query: User's question
+            chat_history: Previous conversation for context
+
+        Returns:
+            Explained response with financial data
+        """
+        # Get raw data first
+        raw_response = self.fetch_raw_data(user_query, chat_history)
+        
+        if raw_response.startswith("Error"):
+            return raw_response
+
+        # Pass the raw response through the explainer for better interpretation
+        explained_response = self.explain_internet_data(user_query, raw_response)
+        return explained_response
 
     def explain_internet_data(self, query: str, raw_data: str) -> str:
         """
