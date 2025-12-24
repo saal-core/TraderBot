@@ -35,14 +35,14 @@ portfolio_questions = [
     "What are the top-performing assets in the portfolio?",
     "Which holdings have the highest unrealized profit?",
     "How have holdings changed over time?",
-    "What is the historical trend of a specific holding’s market value?",
-    "When was the last update for a specific portfolio?",
-    "Which portfolios have not been updated recently?",
-    "How frequently are portfolio holdings updated?",
-    "How many new portfolios were added in the last quarter?",
-    "What is the most recent holding added to a portfolio?",
-    "What percentage of holdings were updated in the last week?",
-    "How does the performance of portfolios compare over time?",
-    "What cost models are being used for different portfolios?",
+    "What is the historical trend of a specific holding’s market value?", #needs histiorical data
+    "When was the last update for a specific portfolio?", #needs histiorical data
+    "Which portfolios have not been updated recently?", #needs histiorical data
+    "How frequently are portfolio holdings updated?", #needs histiorical data
+    "How many new portfolios were added in the last quarter?", #needs histiorical data  
+    "What is the most recent holding added to a portfolio?", #needs histiorical data
+    "What percentage of holdings were updated in the last week?", #needs histiorical data
+    "How does the performance of portfolios compare over time?", #needs histiorical data
+    "What cost models are being used for different portfolios?", #needs histiorical data
     "What is the year-to-date (YTD) return for each portfolio?"
 ]

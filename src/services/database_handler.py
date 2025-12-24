@@ -129,10 +129,12 @@ Use these placeholders EXACTLY as shown in your SQL WHERE clauses.
 {{matched_symbols}}
 
 **PLACEHOLDER USAGE RULES:**
-- Use placeholders directly in WHERE clauses: `WHERE portfolio_name = :PORTFOLIO_1`
+- ONLY use placeholders that are explicitly listed in "Resolved Entities" above
+- If "Resolved Entities" says "No specific portfolio or account mentioned", do NOT use any :PORTFOLIO_N or :ACCOUNT_N placeholders - query all data instead
+- When placeholders are provided: Use them directly in WHERE clauses: `WHERE portfolio_name = :PORTFOLIO_1`
 - Do NOT wrap placeholders in quotes: Use `:PORTFOLIO_1` not `':PORTFOLIO_1'`
-- If no placeholder is provided, the query is about all portfolios/accounts
-- Placeholders will be substituted with actual values after SQL generation
+- Do NOT invent or create placeholders - only use what is provided above
+- Generic phrases like "the portfolio", "my portfolio", or "the account" without a resolved placeholder means query ALL portfolios/accounts
 
 ---
 
@@ -499,6 +501,22 @@ Since you cannot safely calculate the stock's percentage return (due to buy/sell
             print(f"🔓 Phase 3: Substituting placeholders with actual values...")
             sql = self.alias_resolver.substitute_placeholders(sql, placeholder_map)
             print(f"  → Final SQL: {sql}")
+        
+        # Validate that no unsubstituted placeholders remain
+        import re
+        remaining_placeholders = re.findall(r':(PORTFOLIO_\d+|ACCOUNT_\d+)', sql)
+        if remaining_placeholders:
+            print(f"⚠️  Warning: Unsubstituted placeholders found: {remaining_placeholders}")
+            # Try to substitute any remaining placeholders from the map
+            for placeholder in remaining_placeholders:
+                full_placeholder = f":{placeholder}"
+                if full_placeholder in placeholder_map:
+                    actual_value = placeholder_map[full_placeholder]
+                    sql = sql.replace(full_placeholder, f"'{actual_value}'")
+                    print(f"  → Fixed: {full_placeholder} → '{actual_value}'")
+                else:
+                    # Placeholder exists in SQL but not in map - likely entity resolution failed
+                    return f"ERROR: Could not resolve portfolio/account reference. Please specify the exact portfolio name (e.g., 'A-Balanced', 'Growth Fund')."
 
         return sql
 
