@@ -1,31 +1,29 @@
 """
-TraderBot Main Application
+TraderBot Main Application (Streamlit Frontend)
 A natural language interface for querying financial databases with 
 comparison capabilities between local portfolio data and external market data.
+
+This version uses the FastAPI backend for all processing.
 """
 import streamlit as st
 import pandas as pd
+import requests
 from typing import List, Dict
-import sys
 import os
 import json
 from datetime import datetime
 
-# Import configuration and custom modules
+# Import configuration
 from src.config.settings import get_app_config, get_ollama_config, get_postgres_config
-from src.services.sql_utilities import PostgreSQLExecutor
-from src.services.gpt_oss_query_router_v2 import OptimizedQueryRouter
-from src.services.database_handler import DatabaseQueryHandler
-from src.services.greating_handler import GreetingHandler
-from src.services.chat_memory import ChatMemory
-from src.services.internet_data_handler import InternetDataHandler
-from src.services.comparison_handler import ComparisonHandler
 
 import warnings 
 warnings.filterwarnings("ignore")
 
 from dotenv import load_dotenv
 load_dotenv()
+
+# API Configuration
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8001")
 
 # Page configuration
 app_config = get_app_config()
@@ -83,34 +81,126 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
+# ============================================================================
+# API Client Functions
+# ============================================================================
+
+def api_request(endpoint: str, method: str = "GET", data: dict = None) -> dict:
+    """Make an API request to the FastAPI backend"""
+    url = f"{API_BASE_URL}{endpoint}"
+    try:
+        if method == "GET":
+            response = requests.get(url, timeout=120)
+        else:
+            response = requests.post(url, json=data, timeout=120)
+        
+        # Try to parse JSON response
+        try:
+            result = response.json()
+        except ValueError:
+            return {"error": f"Invalid JSON response from API: {response.text[:200]}"}
+        
+        # Check for HTTP errors
+        if response.status_code >= 400:
+            error_detail = result.get("detail") or result.get("message") or result.get("error") or f"HTTP {response.status_code}"
+            return {"error": error_detail, "success": False}
+        
+        return result
+    except requests.exceptions.ConnectionError:
+        return {"error": "Cannot connect to API server. Make sure the FastAPI backend is running.", "success": False}
+    except requests.exceptions.Timeout:
+        return {"error": "Request timed out. The server took too long to respond.", "success": False}
+    except requests.exceptions.RequestException as e:
+        return {"error": f"API request failed: {str(e)}", "success": False}
+
+
+def check_api_health() -> bool:
+    """Check if the API is healthy"""
+    result = api_request("/health")
+    return result.get("status") == "healthy"
+
+
+def api_initialize() -> dict:
+    """Initialize the API handlers"""
+    return api_request("/initialize", method="POST")
+
+
+def api_classify_query(query: str) -> str:
+    """Classify a query using the API"""
+    result = api_request("/query/classify", method="POST", data={"query": query})
+    if "error" in result:
+        return "unknown"
+    return result.get("query_type", "unknown")
+
+
+def api_process_query(query_type: str, query: str, chat_history: list) -> dict:
+    """Process a query through the appropriate API endpoint"""
+    endpoint_map = {
+        "database": "/query/database",
+        "greeting": "/query/greeting",
+        "internet_data": "/query/internet",
+        "comparison": "/query/comparison"
+    }
+    
+    endpoint = endpoint_map.get(query_type, "/query/database")
+    
+    # Convert chat history to API format
+    formatted_history = []
+    for msg in chat_history:
+        formatted_history.append({
+            "role": msg.get("role", "user"),
+            "content": msg.get("content", ""),
+            "timestamp": msg.get("timestamp"),
+            "sql_query": msg.get("sql_query"),
+            "query_type": msg.get("query_type")
+        })
+    
+    return api_request(endpoint, method="POST", data={
+        "query": query,
+        "chat_history": formatted_history
+    })
+
+
+def api_get_schema() -> str:
+    """Get database schema from API"""
+    result = api_request("/schema")
+    return result.get("schema_info", "Schema not available")
+
+
+def api_get_stats() -> dict:
+    """Get query statistics from API"""
+    return api_request("/stats")
+
+
+def api_export_chat(messages: list, format_type: str) -> dict:
+    """Export chat history via API"""
+    formatted_messages = []
+    for msg in messages:
+        formatted_messages.append({
+            "role": msg.get("role", "user"),
+            "content": msg.get("content", ""),
+            "timestamp": msg.get("timestamp"),
+            "sql_query": msg.get("sql_query"),
+            "query_type": msg.get("query_type")
+        })
+    
+    return api_request("/chat/export", method="POST", data={
+        "format": format_type,
+        "messages": formatted_messages
+    })
+
+
+# ============================================================================
+# Session State Management
+# ============================================================================
+
 def initialize_session_state():
     """Initialize session state variables"""
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    if "db_initialized" not in st.session_state:
-        st.session_state.db_initialized = False
-
-    if "router" not in st.session_state:
-        st.session_state.router = None
-
-    if "db_handler" not in st.session_state:
-        st.session_state.db_handler = None
-
-    if "greeting_handler" not in st.session_state:
-        st.session_state.greeting_handler = None
-
-    if "internet_data_handler" not in st.session_state:
-        st.session_state.internet_data_handler = None
-
-    if "comparison_handler" not in st.session_state:
-        st.session_state.comparison_handler = None
-
-    if "sql_executor" not in st.session_state:
-        st.session_state.sql_executor = None
-
-    if "chat_memory" not in st.session_state:
-        st.session_state.chat_memory = ChatMemory(max_pairs=5)
+    if "api_initialized" not in st.session_state:
+        st.session_state.api_initialized = False
 
     if "query_stats" not in st.session_state:
         st.session_state.query_stats = {
@@ -121,104 +211,9 @@ def initialize_session_state():
         }
 
 
-def export_chat_history(format_type: str = "json") -> str:
-    """
-    Export chat history to JSON or TXT format
-
-    Args:
-        format_type: Either 'json' or 'txt'
-
-    Returns:
-        Formatted string of chat history
-    """
-    if format_type == "json":
-        export_data = []
-        for msg in st.session_state.messages:
-            clean_msg = {
-                "role": msg["role"],
-                "content": msg["content"],
-                "timestamp": datetime.now().isoformat()
-            }
-            if "sql_query" in msg and msg["sql_query"]:
-                clean_msg["sql_query"] = msg["sql_query"]
-            if "query_type" in msg:
-                clean_msg["query_type"] = msg["query_type"]
-            export_data.append(clean_msg)
-        return json.dumps(export_data, indent=2)
-    else:  # txt format
-        txt_lines = [f"TraderBot Chat History - Exported at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"]
-        txt_lines.append("=" * 80 + "\n\n")
-
-        for i, msg in enumerate(st.session_state.messages, 1):
-            txt_lines.append(f"Message {i} - {msg['role'].upper()}\n")
-            txt_lines.append("-" * 40 + "\n")
-            txt_lines.append(f"{msg['content']}\n")
-            if "sql_query" in msg and msg["sql_query"]:
-                txt_lines.append(f"\nSQL Query:\n{msg['sql_query']}\n")
-            if "query_type" in msg:
-                txt_lines.append(f"\nQuery Type: {msg['query_type']}\n")
-            txt_lines.append("\n" + "=" * 80 + "\n\n")
-
-        return "".join(txt_lines)
-
-
-def get_query_statistics() -> Dict[str, int]:
-    """
-    Calculate statistics from chat history
-
-    Returns:
-        Dictionary with query type counts
-    """
-    stats = {"database": 0, "greeting": 0, "internet_data": 0, "comparison": 0, "total": 0}
-
-    for msg in st.session_state.messages:
-        if msg["role"] == "user":
-            stats["total"] += 1
-
-    stats.update(st.session_state.query_stats)
-    return stats
-
-
-def initialize_handlers():
-    """Initialize all handlers and database connection"""
-    try:
-        with st.spinner("Initializing chatbot components..."):
-            ollama_config = get_ollama_config()
-
-            # Initialize PostgreSQL executor
-            st.session_state.sql_executor = PostgreSQLExecutor()
-
-            # Test database connection
-            success, message = st.session_state.sql_executor.test_connection()
-            if not success:
-                st.error(f"❌ {message}")
-                return False
-
-            st.success(message)
-
-            # Initialize handlers
-            st.session_state.router = OptimizedQueryRouter(sql_executor=st.session_state.sql_executor)
-            st.session_state.db_handler = DatabaseQueryHandler(sql_executor=st.session_state.sql_executor)
-            st.session_state.greeting_handler = GreetingHandler()
-            st.session_state.internet_data_handler = InternetDataHandler()
-            
-            # Initialize comparison handler with existing handlers
-            st.session_state.comparison_handler = ComparisonHandler(
-                db_handler=st.session_state.db_handler,
-                internet_handler=st.session_state.internet_data_handler,
-                sql_executor=st.session_state.sql_executor,
-                use_openai=True  # Use OpenAI for better comparison planning
-            )
-
-            st.session_state.db_initialized = True
-            st.success("✅ All components initialized successfully!")
-            return True
-
-    except Exception as e:
-        st.error(f"❌ Error initializing components: {str(e)}")
-        st.session_state.db_initialized = False
-        return False
-
+# ============================================================================
+# Display Functions
+# ============================================================================
 
 def display_chat_history():
     """Display chat message history"""
@@ -246,111 +241,15 @@ def display_chat_history():
             # Display comparison details if present
             if "comparison_plan" in message and message["comparison_plan"]:
                 with st.expander("🔄 View Comparison Details"):
-                    plan = message["comparison_plan"]
-                    st.json(plan)
+                    st.json(message["comparison_plan"])
 
 
-def process_database_query(user_query: str) -> Dict:
-    """Process a database query with conversation context"""
-    response = {
-        "content": "",
-        "sql_query": "",
-        "results_df": None
-    }
+# ============================================================================
+# Query Processing
+# ============================================================================
 
-    try:
-        # Get database schema
-        schema = st.session_state.sql_executor.get_schema_info()
-
-        if "Error" in schema:
-            response["content"] = f"❌ Failed to retrieve database schema: {schema}"
-            return response
-
-        # Get chat history for follow-up questions
-        chat_history = st.session_state.messages
-
-        # Generate SQL with conversation context
-        with st.spinner("🤖 Generating SQL query..."):
-            sql_query = st.session_state.db_handler.generate_sql(user_query, schema, chat_history)
-
-        if sql_query.startswith("ERROR"):
-            response["content"] = f"❌ {sql_query}"
-            return response
-
-        response["sql_query"] = sql_query
-
-        # Validate and execute query
-        with st.spinner("✅ Validating and executing query..."):
-            success, results_df, message = st.session_state.sql_executor.execute_query(sql_query)
-
-        if not success:
-            response["content"] = f"❌ Query execution failed: {message}"
-            return response
-
-        response["results_df"] = results_df
-
-        # Generate natural language explanation
-        with st.spinner("📝 Generating explanation..."):
-            explanation = st.session_state.db_handler.explain_results(user_query, results_df, sql_query)
-
-        response["content"] = f"✅ {explanation}\n\n💡 {message}"
-
-    except Exception as e:
-        response["content"] = f"❌ Error processing query: {str(e)}"
-
-    return response
-
-
-def process_greeting(user_query: str) -> Dict:
-    """Process a greeting or chitchat with memory"""
-    response = {
-        "content": "",
-        "sql_query": None,
-        "results_df": None
-    }
-
-    try:
-        with st.spinner("💬 Generating response..."):
-            chat_history = st.session_state.messages
-            greeting_response = st.session_state.greeting_handler.respond(user_query, chat_history)
-            response["content"] = f"{greeting_response}"
-
-    except Exception as e:
-        response["content"] = f"❌ Error: {str(e)}"
-
-    return response
-
-
-def process_internet_data(user_query: str) -> Dict:
-    """Process an internet data query using Perplexity API"""
-    response = {
-        "content": "",
-        "sql_query": None,
-        "results_df": None
-    }
-
-    try:
-        with st.spinner("🌐 Fetching real-time data from the internet..."):
-            chat_history = st.session_state.messages
-            data_response = st.session_state.internet_data_handler.fetch_data(user_query, chat_history)
-            response["content"] = f"🌐 {data_response}"
-
-    except Exception as e:
-        response["content"] = f"❌ Error: {str(e)}"
-
-    return response
-
-
-def process_comparison_query(user_query: str) -> Dict:
-    """
-    Process a comparison query that requires both local and external data.
-    
-    Args:
-        user_query: User's comparison question
-        
-    Returns:
-        Dictionary with comparison results
-    """
+def process_query(query_type: str, user_query: str) -> Dict:
+    """Process a query through the API and return formatted response"""
     response = {
         "content": "",
         "sql_query": None,
@@ -359,37 +258,42 @@ def process_comparison_query(user_query: str) -> Dict:
         "local_data": None,
         "external_data": None
     }
-
-    try:
-        with st.spinner("🔄 Processing comparison query..."):
-            # Show sub-steps
-            status_container = st.empty()
-            
-            status_container.info("📋 Step 1/4: Planning comparison...")
-            
-            chat_history = st.session_state.messages
-            
-            # Process comparison through the handler
-            comparison_result = st.session_state.comparison_handler.process(
-                user_query, 
-                chat_history
-            )
-            
-            # Extract results
-            response["content"] = comparison_result.get("content", "")
-            response["sql_query"] = comparison_result.get("sql_query")
-            response["results_df"] = comparison_result.get("results_df")
-            response["comparison_plan"] = comparison_result.get("comparison_plan")
-            response["local_data"] = comparison_result.get("local_data")
-            response["external_data"] = comparison_result.get("external_data")
-            
-            status_container.empty()
-
-    except Exception as e:
-        response["content"] = f"❌ Error processing comparison: {str(e)}"
-
+    
+    # Get appropriate spinner message
+    spinner_messages = {
+        "database": "🤖 Processing database query...",
+        "greeting": "💬 Generating response...",
+        "internet_data": "🌐 Fetching real-time data...",
+        "comparison": "🔄 Processing comparison query..."
+    }
+    
+    with st.spinner(spinner_messages.get(query_type, "Processing...")):
+        result = api_process_query(query_type, user_query, st.session_state.messages)
+    
+    # Check for errors (API returns error:null on success, so check value not just key)
+    if result.get("error"):
+        response["content"] = f"❌ {result['error']}"
+        return response
+    
+    response["content"] = result.get("content", "")
+    response["sql_query"] = result.get("sql_query")
+    
+    # Convert results list back to DataFrame for display
+    if result.get("results"):
+        response["results_df"] = pd.DataFrame(result["results"])
+    
+    # Handle comparison-specific data
+    if query_type == "comparison":
+        response["comparison_plan"] = result.get("comparison_plan")
+        response["local_data"] = result.get("local_data")
+        response["external_data"] = result.get("external_data")
+    
     return response
 
+
+# ============================================================================
+# Main Application
+# ============================================================================
 
 def main():
     """Main application function"""
@@ -421,18 +325,36 @@ def main():
             st.text(f"Database: {postgres_config['database']}")
             st.text(f"User: {postgres_config['user']}")
             st.text(f"Port: {postgres_config['port']}")
+        
+        st.subheader("🌐 API Settings")
+        st.text(f"URL: {API_BASE_URL}")
+        
+        # Check API health
+        if check_api_health():
+            st.success("API: Connected ✅")
+        else:
+            st.error("API: Not Connected ❌")
 
         st.divider()
 
         if st.button("🔄 Initialize/Reinitialize", use_container_width=True):
-            initialize_handlers()
+            with st.spinner("Initializing API components..."):
+                result = api_initialize()
+            
+            if result.get("success"):
+                st.session_state.api_initialized = True
+                st.success(f"✅ {result.get('message', 'Initialized!')}")
+            else:
+                st.session_state.api_initialized = False
+                error_msg = result.get("error") or result.get("message") or "Unknown error occurred"
+                st.error(f"❌ {error_msg}")
 
         st.divider()
 
         # Display database schema
-        if st.session_state.db_initialized and st.session_state.sql_executor:
+        if st.session_state.api_initialized:
             with st.expander("📋 View Database Schema"):
-                schema_info = st.session_state.sql_executor.get_schema_info()
+                schema_info = api_get_schema()
                 st.text(schema_info)
 
         st.divider()
@@ -451,7 +373,7 @@ def main():
                 if st.button(query, key=f"db_{query}", use_container_width=True):
                     st.session_state.example_query = query
 
-        # Comparison queries (NEW)
+        # Comparison queries
         with st.expander("🔄 Comparison Queries", expanded=False):
             comparison_queries = [
                 "Compare my portfolio to S&P 500",
@@ -491,9 +413,9 @@ def main():
         with st.expander("ℹ️ Configuration Details"):
             st.json({
                 "Ollama Model": ollama_config['model_name'],
+                "API URL": API_BASE_URL,
                 "Max Result Rows": os.getenv("MAX_RESULT_ROWS", 100),
                 "Query Timeout": f"{os.getenv('QUERY_TIMEOUT', 30)} seconds",
-                "SQL Injection Protection": os.getenv("ENABLE_SQL_INJECTION_PROTECTION", "True"),
             })
 
         st.divider()
@@ -501,23 +423,19 @@ def main():
         # Chat Management Section
         st.subheader("💬 Chat Management")
 
-        # Display chat statistics
+        # Display chat statistics from API
         if st.session_state.messages:
-            stats = get_query_statistics()
-            st.metric("Total Queries", stats["total"])
+            stats = api_get_stats()
+            if "error" not in stats:
+                st.metric("Total Queries", stats.get("total", 0))
 
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("💾 DB", stats["database"])
-                st.metric("🌐 Web", stats["internet_data"])
-            with col2:
-                st.metric("🔄 Compare", stats["comparison"])
-                st.metric("💬 Chat", stats["greeting"])
-
-            # Chat memory info
-            if st.session_state.chat_memory:
-                pairs_count = st.session_state.chat_memory.count_pairs(st.session_state.messages)
-                st.caption(f"📝 Context Memory: {pairs_count}/5 pairs")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("💾 DB", stats.get("database", 0))
+                    st.metric("🌐 Web", stats.get("internet_data", 0))
+                with col2:
+                    st.metric("🔄 Compare", stats.get("comparison", 0))
+                    st.metric("💬 Chat", stats.get("greeting", 0))
 
             st.divider()
 
@@ -527,25 +445,27 @@ def main():
 
             with col1:
                 if st.button("📄 Export TXT", use_container_width=True):
-                    txt_content = export_chat_history("txt")
-                    st.download_button(
-                        label="⬇️ Download TXT",
-                        data=txt_content,
-                        file_name=f"chat_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                        mime="text/plain",
-                        use_container_width=True
-                    )
+                    result = api_export_chat(st.session_state.messages, "txt")
+                    if result.get("success"):
+                        st.download_button(
+                            label="⬇️ Download TXT",
+                            data=result["content"],
+                            file_name=result["filename"],
+                            mime="text/plain",
+                            use_container_width=True
+                        )
 
             with col2:
                 if st.button("📋 Export JSON", use_container_width=True):
-                    json_content = export_chat_history("json")
-                    st.download_button(
-                        label="⬇️ Download JSON",
-                        data=json_content,
-                        file_name=f"chat_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                        mime="application/json",
-                        use_container_width=True
-                    )
+                    result = api_export_chat(st.session_state.messages, "json")
+                    if result.get("success"):
+                        st.download_button(
+                            label="⬇️ Download JSON",
+                            data=result["content"],
+                            file_name=result["filename"],
+                            mime="application/json",
+                            use_container_width=True
+                        )
 
         st.divider()
 
@@ -557,35 +477,38 @@ def main():
                 "internet_data": 0,
                 "comparison": 0
             }
+            # Reset API stats
+            api_request("/stats/reset", method="POST")
             st.rerun()
 
-    # Check if initialized
-    if not st.session_state.db_initialized:
-        st.warning("⚠️ Please initialize the chatbot using the sidebar.")
-        st.info("Click the '🔄 Initialize/Reinitialize' button to start.")
+    # Check if API is initialized
+    if not st.session_state.api_initialized:
+        # Check if API is already initialized on the backend
+        health = api_request("/health")
+        if health.get("initialized"):
+            st.session_state.api_initialized = True
+        else:
+            st.warning("⚠️ Please initialize the chatbot using the sidebar.")
+            st.info("Click the '🔄 Initialize/Reinitialize' button to start.")
 
-        st.markdown("### 📋 Before You Start:")
-        st.markdown("""
-        1. Make sure PostgreSQL is running
-        2. Update [config.py](config.py) with your database credentials:
-           - `POSTGRES_HOST`
-           - `POSTGRES_DATABASE`
-           - `POSTGRES_USER`
-           - `POSTGRES_PASSWORD`
-        3. Make sure Ollama is running with the specified model
-        4. Click 'Initialize/Reinitialize' in the sidebar
-        """)
-        
-        st.markdown("### 🆕 New Feature: Comparison Queries")
-        st.markdown("""
-        You can now compare your local portfolio data with external market data!
-        
-        **Example queries:**
-        - "Compare my portfolio to S&P 500"
-        - "How does my portfolio perform against the market?"
-        - "Is my portfolio outperforming NASDAQ this year?"
-        """)
-        return
+            st.markdown("### 📋 Before You Start:")
+            st.markdown("""
+            1. Make sure the FastAPI backend is running: `uvicorn api:app --reload`
+            2. Make sure PostgreSQL is running
+            3. Make sure Ollama is running with the specified model
+            4. Click 'Initialize/Reinitialize' in the sidebar
+            """)
+            
+            st.markdown("### 🆕 New Feature: Comparison Queries")
+            st.markdown("""
+            You can now compare your local portfolio data with external market data!
+            
+            **Example queries:**
+            - "Compare my portfolio to S&P 500"
+            - "How does my portfolio perform against the market?"
+            - "Is my portfolio outperforming NASDAQ this year?"
+            """)
+            return
 
     # Display chat history
     display_chat_history()
@@ -611,13 +534,9 @@ def main():
             st.caption(f"🕒 {timestamp}")
             st.markdown(user_input)
 
-        # Route the query
+        # Route the query via API
         with st.spinner("🤔 Understanding your question..."):
-            query_type = st.session_state.router.classify_query(user_input)
-
-        # Track query statistics
-        if query_type in st.session_state.query_stats:
-            st.session_state.query_stats[query_type] += 1
+            query_type = api_classify_query(user_input)
 
         # Show query type with appropriate icon
         type_icons = {
@@ -631,20 +550,7 @@ def main():
 
         # Process based on type
         with st.chat_message("assistant"):
-            if query_type == "database":
-                response = process_database_query(user_input)
-            elif query_type == "greeting":
-                response = process_greeting(user_input)
-            elif query_type == "internet_data":
-                response = process_internet_data(user_input)
-            elif query_type == "comparison":
-                response = process_comparison_query(user_input)
-            else:
-                response = {
-                    "content": "❌ Sorry, I couldn't understand your question.",
-                    "sql_query": None,
-                    "results_df": None
-                }
+            response = process_query(query_type, user_input)
 
             # Display response
             st.markdown(response["content"])
