@@ -4,6 +4,7 @@ from typing import List, Dict, Optional, Tuple, Any
 from datetime import datetime, timedelta
 import re
 from src.services.fmp_service import FMPService
+from src.services.perplexity_service import PerplexityService
 from src.services.chat_memory import ChatMemory
 from langchain_community.llms import Ollama
 from langchain_core.prompts import PromptTemplate
@@ -24,6 +25,7 @@ class InternetDataHandler:
             memory_max_pairs: Maximum number of Q&A pairs to remember
         """
         self.fmp = FMPService()
+        self.perplexity = PerplexityService()
         self.chat_memory = ChatMemory(max_pairs=memory_max_pairs)
 
         # Initialize Ollama for query analysis and response generation
@@ -450,47 +452,132 @@ Please try again later or ask a different question."""
         response += "\n*Data is real-time during market hours.*"
         return response
 
-    def _handle_news(self, query: str) -> str:
-        """Handle news queries with better topic detection."""
-        print("  → Fetching news...")
+    def _handle_news(self, query: str, chat_history: List[Dict[str, str]] = None) -> str:
+        """Handle news queries with FMP + Perplexity hybrid approach for enhanced coverage."""
+        print("  → Fetching news (FMP + Perplexity hybrid)...")
 
         query_lower = query.lower()
-        topic = None
-        news = []
-
-        # Detect specific topics
+        symbol = self._resolve_symbol(query)
+        topic = symbol.upper() if symbol else None
+        
+        # Detect specific topics for context
         if "oil" in query_lower:
-            topic = "oil"
-            news = self.fmp.search_news("oil crude petroleum", limit=5)
-            
-            # Also get oil price for context
-            oil_quote = self.fmp.get_commodity_quote("OIL")
-            oil_context = ""
-            if oil_quote:
-                price = oil_quote.get("price", 0)
-                change_pct = oil_quote.get("changesPercentage", 0)
-                oil_context = f"\n\n**Current Crude Oil Price:** ${price:.2f} ({change_pct:+.2f}%)\n"
-                
+            topic = "Oil"
         elif "gold" in query_lower:
-            topic = "gold"
-            news = self.fmp.search_news("gold", limit=5)
+            topic = "Gold"
         elif "crypto" in query_lower or "bitcoin" in query_lower:
-            topic = "cryptocurrency"
-            news = self.fmp.search_news("bitcoin crypto", limit=5)
-        elif "market" in query_lower and ("affect" in query_lower or "impact" in query_lower):
-            topic = "market impact"
-            news = self.fmp.get_general_news(limit=10)
-        else:
-            # Check for specific stock
-            symbol = self._resolve_symbol(query)
-            if symbol:
-                topic = symbol
-                news = self.fmp.get_stock_news(symbol, limit=5)
-            else:
-                news = self.fmp.get_general_news(limit=5)
+            topic = "Cryptocurrency"
+        elif "market" in query_lower:
+            topic = "Market"
 
-        if not news:
-            return f"""I couldn't find specific news about {topic if topic else 'that topic'} at the moment.
+        # Step 1: Try FMP for structured stock-specific news
+        fmp_news = []
+        if symbol:
+            fmp_news = self.fmp.get_stock_news(symbol, limit=5)
+        
+        if not fmp_news and topic:
+            # Try searching for topic-related news
+            fmp_news = self.fmp.search_news(topic, limit=5)
+        
+        if not fmp_news:
+            fmp_news = self.fmp.get_general_news(limit=5)
+
+        # Step 2: Enhance with Perplexity for AI-analyzed news
+        perplexity_response = ""
+        try:
+            perplexity_response = self._fetch_perplexity_news(query, chat_history)
+        except Exception as e:
+            print(f"  → Perplexity enhancement failed: {e}")
+
+        # Step 3: Combine responses
+        response = self._combine_news_sources(query, topic, fmp_news, perplexity_response)
+
+        return response
+
+    def _fetch_perplexity_news(self, query: str, chat_history: List[Dict[str, str]] = None) -> str:
+        """
+        Fetch news using Perplexity for AI-enhanced financial news with sources.
+        
+        Args:
+            query: User's news query
+            chat_history: Conversation history for context
+            
+        Returns:
+            Formatted news response from Perplexity
+        """
+        # Create a finance-focused news prompt
+        news_prompt = (
+            f"Get the latest financial news and market analysis about: {query}. "
+            "Focus on stock performance, market impact, and analyst opinions. "
+            "Include specific data points, price movements, and key developments. "
+            "Be concise but comprehensive."
+        )
+        
+        history = chat_history or []
+        return self.perplexity.query(news_prompt, history)
+
+    def _combine_news_sources(self, query: str, topic: str, fmp_news: List[Dict], perplexity_response: str) -> str:
+        """
+        Combine FMP structured news with Perplexity AI analysis.
+        
+        Args:
+            query: Original user query
+            topic: Detected topic/symbol
+            fmp_news: List of news articles from FMP
+            perplexity_response: AI-analyzed news from Perplexity
+            
+        Returns:
+            Combined formatted news response
+        """
+        
+        # If we have Perplexity response and it's substantial, use it as primary
+        if perplexity_response and len(perplexity_response) > 100 and not perplexity_response.startswith("Error"):
+            response = f"**Latest News & Analysis{' — ' + topic if topic else ''}**\n\n"
+            response += perplexity_response
+            
+            # Append FMP headlines as additional references if available
+            if fmp_news:
+                response += "\n\n---\n**📰 Additional Headlines:**\n"
+                for i, article in enumerate(fmp_news[:3], 1):
+                    title = article.get("title", "No title")
+                    url = article.get("url", "")
+                    source = article.get("site", article.get("source", "Unknown"))
+                    if len(title) > 80:
+                        title = title[:77] + "..."
+                    if url:
+                        response += f"{i}. [{title}]({url}) — *{source}*\n"
+                    else:
+                        response += f"{i}. {title} — *{source}*\n"
+            
+            return response
+        
+        # Fallback to FMP-only if Perplexity fails or returns empty
+        if fmp_news:
+            topic_display = topic if topic else "Market"
+            response = f"**Latest News about {topic_display}**\n\n"
+            
+            for i, article in enumerate(fmp_news[:5], 1):
+                title = article.get("title", "No title")
+                source = article.get("site", article.get("source", "Unknown"))
+                date = article.get("publishedDate", "")[:10] if article.get("publishedDate") else ""
+                url = article.get("url", "")
+                
+                if len(title) > 100:
+                    title = title[:97] + "..."
+                
+                response += f"**{i}. {title}**\n"
+                response += f"   📰 {source}"
+                if date:
+                    response += f" | 📅 {date}"
+                response += "\n"
+                if url:
+                    response += f"   🔗 [Read more]({url})\n"
+                response += "\n"
+            
+            return response
+        
+        # No news found from either source
+        return f"""I couldn't find news about {topic if topic else 'that topic'} at the moment.
 
 **Suggestions:**
 - Try asking about a specific company (e.g., "News about Apple")
@@ -498,35 +585,6 @@ Please try again later or ask a different question."""
 - Check back later for updated news
 
 You can also ask about current prices, market performance, or other financial data."""
-
-        # Build response
-        title = f"Latest News" + (f" about {topic.upper()}" if topic else "")
-        response = f"**{title}**\n\n"
-        
-        # Add oil context if available
-        if 'oil_context' in dir() and oil_context:
-            response = oil_context + response
-
-        for i, article in enumerate(news[:5], 1):
-            title = article.get("title", "No title")
-            source = article.get("site", article.get("source", "Unknown"))
-            date = article.get("publishedDate", "")[:10] if article.get("publishedDate") else ""
-            url = article.get("url", "")
-
-            # Truncate long titles
-            if len(title) > 100:
-                title = title[:97] + "..."
-
-            response += f"**{i}. {title}**\n"
-            response += f"   📰 {source}"
-            if date:
-                response += f" | 📅 {date}"
-            response += "\n"
-            if url:
-                response += f"   🔗 [Read more]({url})\n"
-            response += "\n"
-
-        return response
 
     def _handle_market_movers(self, query: str) -> str:
         """Handle top gainers/losers queries."""
@@ -560,59 +618,6 @@ You can also ask about current prices, market performance, or other financial da
 
             response += f"{i}. **{symbol}** ({name})\n"
             response += f"   Price: ${price:.2f} | Change: {change:+.2f} ({change_pct:+.2f}%)\n\n"
-
-        return response
-
-    def _handle_news(self, query: str) -> str:
-        """Handle news queries."""
-        print("  → Fetching news...")
-
-        query_lower = query.lower()
-
-        # Check for specific topics
-        if "oil" in query_lower:
-            # Search for oil-related news
-            news = self.fmp.search_news("oil", limit=5)
-            if not news:
-                # Get commodity price as context
-                oil_quote = self.fmp.get_commodity_quote("OIL")
-                oil_info = ""
-                if oil_quote:
-                    oil_info = f"\n\n**Current Oil Price:** ${oil_quote.get('price', 'N/A'):.2f} ({oil_quote.get('changesPercentage', 0):+.2f}%)"
-
-                # Fallback to general news
-                news = self.fmp.get_general_news(limit=10)
-                # Filter for oil-related
-                news = [n for n in news if "oil" in n.get("title", "").lower() or "oil" in n.get("text", "").lower()][:5]
-
-                if not news:
-                    return f"I couldn't find specific news about oil prices.{oil_info}\n\nTry checking major financial news sources for the latest updates."
-
-        elif "market" in query_lower and "affect" in query_lower:
-            news = self.fmp.get_general_news(limit=10)
-        else:
-            # Check if asking about a specific stock
-            symbol = self._resolve_symbol(query)
-            if symbol:
-                news = self.fmp.get_stock_news(symbol, limit=5)
-            else:
-                news = self.fmp.get_general_news(limit=5)
-
-        if not news:
-            return "I couldn't fetch news at the moment. Please try again later."
-
-        response = "**Latest Financial News**\n\n"
-        for i, article in enumerate(news[:5], 1):
-            title = article.get("title", "No title")
-            source = article.get("site", article.get("source", "Unknown"))
-            date = article.get("publishedDate", "")[:10]
-            url = article.get("url", "")
-
-            response += f"{i}. **{title}**\n"
-            response += f"   Source: {source} | Date: {date}\n"
-            if url:
-                response += f"   [Read more]({url})\n"
-            response += "\n"
 
         return response
 
@@ -801,7 +806,7 @@ You can also ask about current prices, market performance, or other financial da
             elif query_type == "MARKET_MOVERS":
                 response = self._handle_market_movers(user_query)
             elif query_type == "NEWS":
-                response = self._handle_news(user_query)
+                response = self._handle_news(user_query, chat_history)
             elif query_type == "COMMODITY_PRICE":
                 response = self._handle_commodity(user_query)
             elif query_type == "CRYPTO_PRICE":
