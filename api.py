@@ -27,6 +27,7 @@ from src.services.greating_handler import GreetingHandler
 from src.services.internet_data_handler import InternetDataHandler
 from src.services.comparison_handler import ComparisonHandler
 from src.services.chat_memory import ChatMemory
+from src.utils.response_cleaner import clean_llm_response
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -125,6 +126,13 @@ def dataframe_to_list(df: pd.DataFrame) -> List[Dict[str, Any]]:
     if df is None:
         return None
     return df.to_dict(orient="records")
+
+
+def clean_response_content(content: str) -> str:
+    """Clean LLM response content for proper frontend display"""
+    if not content:
+        return content
+    return clean_llm_response(content)
 
 
 # ============================================================================
@@ -256,9 +264,12 @@ async def process_database_query(request: QueryRequest):
         
         app_state.query_stats["database"] += 1
         
+        # Clean explanation content for proper frontend display
+        cleaned_explanation = clean_response_content(explanation)
+        
         return QueryResponse(
             success=True,
-            content=f"✅ {explanation}\n\n💡 {message}",
+            content=f"✅ {cleaned_explanation}\n\n💡 {message}",
             sql_query=sql_query,
             results=dataframe_to_list(results_df),
             query_type="database"
@@ -288,9 +299,12 @@ async def process_greeting(request: QueryRequest):
         
         app_state.query_stats["greeting"] += 1
         
+        # Clean greeting response for proper frontend display
+        cleaned_response = clean_response_content(response)
+        
         return QueryResponse(
             success=True,
-            content=response,
+            content=cleaned_response,
             query_type="greeting"
         )
         
@@ -320,9 +334,12 @@ async def process_internet_query(request: QueryRequest):
         
         app_state.query_stats["internet_data"] += 1
         
+        # Clean internet data response for proper frontend display
+        cleaned_response = clean_response_content(response)
+        
         return QueryResponse(
             success=True,
-            content=f"🌐 {response}",
+            content=f"🌐 {cleaned_response}",
             query_type="internet_data"
         )
         
@@ -353,9 +370,12 @@ async def process_comparison_query(request: QueryRequest):
         
         app_state.query_stats["comparison"] += 1
         
+        # Clean comparison response for proper frontend display
+        cleaned_content = clean_response_content(result.get("content", ""))
+        
         return QueryResponse(
             success=True,
-            content=result.get("content", ""),
+            content=cleaned_content,
             sql_query=result.get("sql_query"),
             results=dataframe_to_list(result.get("results_df")),
             query_type="comparison",

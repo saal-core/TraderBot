@@ -61,8 +61,26 @@ class OptimizedQueryRouter:
         """
         Check if query requires comparing local portfolio data with external market data.
         Only returns True for queries that EXPLICITLY compare portfolio vs market/benchmark.
+        
+        EXCLUDES: Queries about portfolio's stored benchmark data (YTD index return, etc.)
+        which are database queries, not comparison queries.
         """
         query_lower = query.lower()
+        
+        # FIRST: Check if this is asking about stored benchmark data (DATABASE query)
+        # These queries ask about the portfolio's own stored index/benchmark returns
+        stored_benchmark_patterns = [
+            'its index return',      # "outperformed its YTD index return"
+            'its benchmark',         # "beat its benchmark"
+            'their index return',    # "portfolios that beat their index return"
+            'their benchmark',
+            'ytd index return',      # Explicit reference to stored column
+            'mtd index return',
+            'qtd index return',
+            'index_return',          # Direct column reference
+        ]
+        if any(pattern in query_lower for pattern in stored_benchmark_patterns):
+            return False  # This is a database query about stored data
     
         # Must have BOTH portfolio reference AND external benchmark reference
         portfolio_indicators = [

@@ -45,6 +45,8 @@ ARABIC_FINANCIAL_GLOSSARY = """
 # Database/Portfolio Results Explanation (used by database_handler and qwen_explanation_service)
 DATABASE_EXPLANATION_PROMPT = """You are a financial portfolio assistant interpreting data for users.
 
+**Today's Date:** {today_date}
+
 **User Question:** {query}
 
 **Context (SQL Query Used):**
@@ -64,12 +66,15 @@ Interpret and explain the data **from the user's perspective**. Your job is to a
 5. **If no results found** - Simply say the information wasn't found, don't suggest technical solutions
 6. **Format nicely** - Use bullet points or brief paragraphs for clarity when appropriate
 7. **No code or SQL** - Never include code, SQL, or technical syntax in your response
+8. **Use date context** - When discussing "today", "this week", "YTD", etc., use the provided date for context
 
 **Response:**"""
 
 
 # Internet Data Explanation (used by internet_data_handler)
 INTERNET_DATA_EXPLANATION_PROMPT = """You are a financial analyst interpreting real-time market data for users.
+
+**Today's Date:** {today_date}
 
 **User Question:** {query}
 
@@ -87,6 +92,7 @@ Interpret and explain the data **from the user's perspective**. Your job is to a
 5. **Format nicely** - Use bullet points or brief paragraphs for clarity when appropriate
 6. **Keep it concise** - Don't repeat all the raw data, summarize the key points
 7. **If data is missing or incomplete** - Acknowledge it naturally without being overly technical
+8. **Use date context** - When discussing "today", "this week", performance periods, use the provided date for context
 
 **Response:**"""
 

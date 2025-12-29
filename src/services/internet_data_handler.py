@@ -873,7 +873,7 @@ You can also ask about current prices, market performance, or other financial da
             Natural language explanation interpreted for the user
         """
         explain_prompt = PromptTemplate(
-            input_variables=["query", "data"],
+            input_variables=["query", "data", "today_date"],
             template=INTERNET_DATA_EXPLANATION_PROMPT
         )
 
@@ -883,9 +883,13 @@ You can also ask about current prices, market performance, or other financial da
             start_time = time.time()
             print(f"⏱️  Starting: Internet Data Explanation...")
 
+            # Get today's date for context
+            today_date = datetime.now().strftime("%A, %B %d, %Y")
+
             explanation = explain_chain.invoke({
                 "query": query,
-                "data": raw_data
+                "data": raw_data,
+                "today_date": today_date
             })
 
             elapsed = time.time() - start_time

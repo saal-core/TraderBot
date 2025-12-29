@@ -14,6 +14,7 @@ from src.services.chat_memory import ChatMemory
 from src.services.portfolio_alias_resolver import PortfolioAliasResolver
 import os
 import time
+from datetime import datetime
 from rapidfuzz import fuzz, process
 from dotenv import load_dotenv
 load_dotenv()
@@ -537,7 +538,7 @@ Since you cannot safely calculate the stock's percentage return (due to buy/sell
         results_text = format_query_results(results_df) if results_df is not None and not results_df.empty else "No results found"
 
         explain_prompt = PromptTemplate(
-            input_variables=["query", "results", "sql_query"],
+            input_variables=["query", "results", "sql_query", "today_date"],
             template=DATABASE_EXPLANATION_PROMPT
         )
 
@@ -547,10 +548,14 @@ Since you cannot safely calculate the stock's percentage return (due to buy/sell
             start_time = time.time()
             print(f"⏱️  [QWEN H100] Starting: Results Explanation Generation...")
 
+            # Get today's date for context
+            today_date = datetime.now().strftime("%A, %B %d, %Y")
+
             explanation = explain_chain.invoke({
                 "query": query,
                 "results": results_text,
-                "sql_query": sql_query
+                "sql_query": sql_query,
+                "today_date": today_date
             })
 
             elapsed = time.time() - start_time
