@@ -1,594 +1,364 @@
 """
-TraderBot Main Application (Streamlit Frontend)
-A natural language interface for querying financial databases with 
-comparison capabilities between local portfolio data and external market data.
-
-This version uses the FastAPI backend for all processing.
+TraderBot Streamlit UI
+Chat interface for natural language database queries with streaming support.
+Fixed markdown rendering for streaming responses.
 """
 import streamlit as st
-import pandas as pd
 import requests
-from typing import List, Dict
-import os
 import json
-from datetime import datetime
-
-# Import configuration
-from src.config.settings import get_app_config, get_ollama_config, get_postgres_config
-
-import warnings 
-warnings.filterwarnings("ignore")
-
+import os
+import re
+from pathlib import Path
 from dotenv import load_dotenv
-load_dotenv()
 
-# API Configuration
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8001")
+# Load environment variables from the project root
+env_path = Path(__file__).parent / ".env"
+load_dotenv(dotenv_path=env_path)
 
-# Page configuration
-app_config = get_app_config()
+# Configure the page
 st.set_page_config(
-    page_title=app_config["title"],
-    page_icon=app_config["icon"],
+    page_title="TraderBot - Financial Assistant",
+    page_icon="📊",
     layout="wide"
 )
 
-# Custom CSS
+# Custom CSS for better styling
 st.markdown("""
-<style>
-    .main-header {
-        font-size: 3rem;
-        font-weight: bold;
-        color: #1f77b4;
-        text-align: center;
+    <style>
+    .main {
+        padding: 1rem;
+    }
+    .stTextInput > div > div > input {
+        font-size: 1.1rem;
+    }
+    .stButton > button {
+        width: 100%;
+        height: 3rem;
+        font-size: 1.1rem;
+    }
+    .chat-message {
+        padding: 1rem;
+        border-radius: 0.5rem;
         margin-bottom: 1rem;
     }
-    .sub-header {
-        text-align: center;
-        color: #666;
-        margin-bottom: 2rem;
+    .user-message {
+        background-color: #1e3a5f;
     }
-    .query-box {
-        background-color: #f0f2f6;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        margin: 1rem 0;
+    .assistant-message {
+        background-color: #2d3748;
     }
-    .sql-code {
-        background-color: #282c34;
-        color: #abb2bf;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        font-family: 'Courier New', monospace;
-        margin: 1rem 0;
+    .status-indicator {
+        color: #718096;
+        font-style: italic;
     }
-    .status-success {
-        color: #28a745;
-        font-weight: bold;
-    }
-    .status-error {
-        color: #dc3545;
-        font-weight: bold;
-    }
-    .comparison-box {
-        background-color: #e8f4f8;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        border-left: 4px solid #1f77b4;
-        margin: 1rem 0;
-    }
-</style>
-""", unsafe_allow_html=True)
+    </style>
+    """, unsafe_allow_html=True)
+
+# API endpoint configuration
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8001")
+ENABLE_STREAMING = os.getenv("ENABLE_STREAMING", "true").lower() == "true"
+
+# Initialize session state
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+if "initialized" not in st.session_state:
+    st.session_state.initialized = False
 
 
-# ============================================================================
-# API Client Functions
-# ============================================================================
 
-def api_request(endpoint: str, method: str = "GET", data: dict = None) -> dict:
-    """Make an API request to the FastAPI backend"""
-    url = f"{API_BASE_URL}{endpoint}"
+
+
+def initialize_api():
+    """Initialize the API connection."""
     try:
-        if method == "GET":
-            response = requests.get(url, timeout=120)
-        else:
-            response = requests.post(url, json=data, timeout=120)
-        
-        # Try to parse JSON response
-        try:
-            result = response.json()
-        except ValueError:
-            return {"error": f"Invalid JSON response from API: {response.text[:200]}"}
-        
-        # Check for HTTP errors
-        if response.status_code >= 400:
-            error_detail = result.get("detail") or result.get("message") or result.get("error") or f"HTTP {response.status_code}"
-            return {"error": error_detail, "success": False}
-        
-        return result
-    except requests.exceptions.ConnectionError:
-        return {"error": "Cannot connect to API server. Make sure the FastAPI backend is running.", "success": False}
-    except requests.exceptions.Timeout:
-        return {"error": "Request timed out. The server took too long to respond.", "success": False}
+        response = requests.post(f"{API_BASE_URL}/initialize", timeout=30)
+        if response.status_code == 200:
+            data = response.json()
+            return data.get("success", False), data.get("message", "Unknown error")
+        return False, f"HTTP {response.status_code}: {response.text}"
     except requests.exceptions.RequestException as e:
-        return {"error": f"API request failed: {str(e)}", "success": False}
+        return False, f"Connection error: {str(e)}"
 
 
-def check_api_health() -> bool:
-    """Check if the API is healthy"""
-    result = api_request("/health")
-    return result.get("status") == "healthy"
-
-
-def api_initialize() -> dict:
-    """Initialize the API handlers"""
-    return api_request("/initialize", method="POST")
-
-
-def api_classify_query(query: str) -> str:
-    """Classify a query using the API"""
-    result = api_request("/query/classify", method="POST", data={"query": query})
-    if "error" in result:
-        return "unknown"
-    return result.get("query_type", "unknown")
-
-
-def api_process_query(query_type: str, query: str, chat_history: list) -> dict:
-    """Process a query through the appropriate API endpoint"""
-    endpoint_map = {
-        "database": "/query/database",
-        "greeting": "/query/greeting",
-        "internet_data": "/query/internet",
-        "comparison": "/query/comparison"
-    }
-    
-    endpoint = endpoint_map.get(query_type, "/query/database")
-    
-    # Convert chat history to API format
-    formatted_history = []
-    for msg in chat_history:
-        formatted_history.append({
-            "role": msg.get("role", "user"),
-            "content": msg.get("content", ""),
+def convert_messages_to_chat_history():
+    """Convert session messages to API chat history format."""
+    chat_history = []
+    for msg in st.session_state.messages[-10:]:  # Last 10 messages
+        chat_history.append({
+            "role": msg["role"],
+            "content": msg["content"],
             "timestamp": msg.get("timestamp"),
             "sql_query": msg.get("sql_query"),
             "query_type": msg.get("query_type")
         })
-    
-    return api_request(endpoint, method="POST", data={
-        "query": query,
-        "chat_history": formatted_history
-    })
+    return chat_history
 
 
-def api_get_schema() -> str:
-    """Get database schema from API"""
-    result = api_request("/schema")
-    return result.get("schema_info", "Schema not available")
-
-
-def api_get_stats() -> dict:
-    """Get query statistics from API"""
-    return api_request("/stats")
-
-
-def api_export_chat(messages: list, format_type: str) -> dict:
-    """Export chat history via API"""
-    formatted_messages = []
-    for msg in messages:
-        formatted_messages.append({
-            "role": msg.get("role", "user"),
-            "content": msg.get("content", ""),
-            "timestamp": msg.get("timestamp"),
-            "sql_query": msg.get("sql_query"),
-            "query_type": msg.get("query_type")
-        })
-    
-    return api_request("/chat/export", method="POST", data={
-        "format": format_type,
-        "messages": formatted_messages
-    })
-
-
-# ============================================================================
-# Session State Management
-# ============================================================================
-
-def initialize_session_state():
-    """Initialize session state variables"""
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
-    if "api_initialized" not in st.session_state:
-        st.session_state.api_initialized = False
-
-    if "query_stats" not in st.session_state:
-        st.session_state.query_stats = {
-            "database": 0, 
-            "greeting": 0, 
-            "internet_data": 0,
-            "comparison": 0
-        }
-
-
-# ============================================================================
-# Display Functions
-# ============================================================================
-
-def display_chat_history():
-    """Display chat message history"""
-    max_display = int(os.getenv("MAX_DISPLAY_MESSAGES", 10))
-    messages_to_display = st.session_state.messages[-max_display:]
-
-    for message in messages_to_display:
-        with st.chat_message(message["role"]):
-            # Display timestamp if available
-            if "timestamp" in message:
-                st.caption(f"🕒 {message['timestamp']}")
-
-            st.markdown(message["content"])
-
-            # Display SQL query if present
-            if "sql_query" in message and message["sql_query"]:
-                with st.expander("🔍 View SQL Query"):
-                    st.code(message["sql_query"], language="sql")
-
-            # Display results dataframe if present
-            if "results_df" in message and message["results_df"] is not None:
-                with st.expander("📊 View Results Table"):
-                    st.dataframe(message["results_df"], use_container_width=True)
-
-            # Display comparison details if present
-            if "comparison_plan" in message and message["comparison_plan"]:
-                with st.expander("🔄 View Comparison Details"):
-                    st.json(message["comparison_plan"])
-
-
-# ============================================================================
-# Query Processing
-# ============================================================================
-
-def process_query(query_type: str, user_query: str) -> Dict:
-    """Process a query through the API and return formatted response"""
-    response = {
-        "content": "",
-        "sql_query": None,
-        "results_df": None,
-        "comparison_plan": None,
-        "local_data": None,
-        "external_data": None
+def process_streaming_query(question: str):
+    """Process a query with streaming response with fixed markdown handling."""
+    headers = {
+        "Accept": "text/event-stream",
+        "Content-Type": "application/json"
     }
     
-    # Get appropriate spinner message
-    spinner_messages = {
-        "database": "🤖 Processing database query...",
-        "greeting": "💬 Generating response...",
-        "internet_data": "🌐 Fetching real-time data...",
-        "comparison": "🔄 Processing comparison query..."
-    }
+    chat_history = convert_messages_to_chat_history()
     
-    with st.spinner(spinner_messages.get(query_type, "Processing...")):
-        result = api_process_query(query_type, user_query, st.session_state.messages)
-    
-    # Check for errors (API returns error:null on success, so check value not just key)
-    if result.get("error"):
-        response["content"] = f"❌ {result['error']}"
-        return response
-    
-    response["content"] = result.get("content", "")
-    response["sql_query"] = result.get("sql_query")
-    
-    # Convert results list back to DataFrame for display
-    if result.get("results"):
-        response["results_df"] = pd.DataFrame(result["results"])
-    
-    # Handle comparison-specific data
-    if query_type == "comparison":
-        response["comparison_plan"] = result.get("comparison_plan")
-        response["local_data"] = result.get("local_data")
-        response["external_data"] = result.get("external_data")
-    
-    return response
-
-
-# ============================================================================
-# Main Application
-# ============================================================================
-
-def main():
-    """Main application function"""
-
-    # Header
-    st.markdown(f'<div class="main-header">{app_config["icon"]} {app_config["title"]}</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-header">Ask questions about your PostgreSQL database in natural language</div>', unsafe_allow_html=True)
-
-    # Initialize session state
-    initialize_session_state()
-
-    # Sidebar configuration
-    with st.sidebar:
-        st.header("⚙️ Configuration")
-
-        # Display current configuration
-        ollama_config = get_ollama_config()
-        postgres_config = get_postgres_config()
-
-        st.subheader("🤖 Ollama Settings")
-        st.text(f"Model: {ollama_config['model_name']}")
-        st.text(f"URL: {ollama_config['base_url']}")
-
-        st.subheader("🗄️ PostgreSQL Settings")
-        if "connection_string" in postgres_config:
-            st.text("Using connection string")
-        else:
-            st.text(f"Host: {postgres_config['host']}")
-            st.text(f"Database: {postgres_config['database']}")
-            st.text(f"User: {postgres_config['user']}")
-            st.text(f"Port: {postgres_config['port']}")
+    try:
+        response = requests.post(
+            f"{API_BASE_URL}/query/stream",
+            json={"query": question, "chat_history": chat_history},
+            headers=headers,
+            stream=True,
+            timeout=120
+        )
         
-        st.subheader("🌐 API Settings")
-        st.text(f"URL: {API_BASE_URL}")
+        status_placeholder = st.empty()
+        response_placeholder = st.empty()
+        final_data = {"final_answer": "", "sql_query": None, "results": None, "query_type": None}
         
-        # Check API health
-        if check_api_health():
-            st.success("API: Connected ✅")
-        else:
-            st.error("API: Not Connected ❌")
 
-        st.divider()
-
-        if st.button("🔄 Initialize/Reinitialize", use_container_width=True):
-            with st.spinner("Initializing API components..."):
-                result = api_initialize()
+        full_response = ""
+        
+        for raw in response.iter_lines(decode_unicode=True):
+            if not raw or not raw.startswith("data:"):
+                continue
             
-            if result.get("success"):
-                st.session_state.api_initialized = True
-                st.success(f"✅ {result.get('message', 'Initialized!')}")
+            try:
+                evt = json.loads(raw[5:].strip())
+                event_type = evt.get("type")
+                
+                if event_type == "status":
+                    data = evt.get("data", {})
+                    status_placeholder.text(f"{data.get('message', '')}")
+                    
+                elif event_type == "content":
+                    content = evt.get("content", "")
+                    if content:
+                        full_response += content
+                        # Get safe-to-display text (with complete markdown)
+                        # Display as plain text
+                        response_placeholder.text(full_response + "▌")
+                    status_placeholder.empty()
+                    
+                elif event_type == "assistant_message_complete":
+                    final_data.update(evt.get("data", {}))
+                    status_placeholder.empty()
+                    # Final render - show complete response as plain text
+                    response_placeholder.text(full_response)
+                    
+                elif event_type == "error":
+                    data = evt.get("data", {})
+                    error_msg = data.get("error", "Unknown error")
+                    status_placeholder.empty()
+                    st.error(f"❌ {error_msg}")
+                    return None
+                    
+                elif event_type == "stream_end":
+                    # Final render without cursor
+                    response_placeholder.text(full_response)
+                    break
+                    
+            except json.JSONDecodeError:
+                continue
+        
+        # Ensure final display is clean
+        response_placeholder.text(full_response)
+        
+        # Update final_data with the full streamed response
+        if full_response:
+            final_data["final_answer"] = full_response
+        
+        return final_data
+        
+    except requests.exceptions.RequestException as e:
+        st.error(f"Failed to connect to the API: {str(e)}")
+        return None
+
+
+def process_non_streaming_query(question: str):
+    """Process a query without streaming (fallback)."""
+    headers = {"Content-Type": "application/json"}
+    chat_history = convert_messages_to_chat_history()
+    
+    try:
+        # First classify the query
+        classify_response = requests.post(
+            f"{API_BASE_URL}/query/classify",
+            json={"query": question},
+            headers=headers,
+            timeout=30
+        )
+        
+        if classify_response.status_code != 200:
+            st.error(f"Classification error: {classify_response.text}")
+            return None
+        
+        query_type = classify_response.json().get("query_type", "database")
+        
+        # Route to appropriate endpoint
+        endpoint_map = {
+            "database": "/query/database",
+            "greeting": "/query/greeting",
+            "internet_data": "/query/internet",
+            "comparison": "/query/comparison"
+        }
+        
+        endpoint = endpoint_map.get(query_type, "/query/database")
+        
+        with st.spinner(f"Processing {query_type} query..."):
+            response = requests.post(
+                f"{API_BASE_URL}{endpoint}",
+                json={"query": question, "chat_history": chat_history},
+                headers=headers,
+                timeout=120
+            )
+        
+        if response.status_code == 200:
+            data = response.json()
+            return {
+                "final_answer": data.get("content", "No answer available"),
+                "sql_query": data.get("sql_query"),
+                "results": data.get("results"),
+                "query_type": data.get("query_type")
+            }
+        else:
+            st.error(f"Error: {response.status_code} - {response.text}")
+            return None
+            
+    except requests.exceptions.RequestException as e:
+        st.error(f"Failed to connect to the API: {str(e)}")
+        return None
+
+
+# Title and description
+st.title("📊 TraderBot - Financial Assistant")
+st.markdown("""
+    Ask questions about your portfolio, compare with market data, or get real-time financial information.
+""")
+
+# Sidebar for settings and info
+with st.sidebar:
+    st.header("⚙️ Settings")
+    
+    # Initialize button
+    if st.button("🔄 Initialize API", type="primary"):
+        with st.spinner("Initializing..."):
+            success, message = initialize_api()
+            if success:
+                st.session_state.initialized = True
+                st.success("✅ " + message)
             else:
-                st.session_state.api_initialized = False
-                error_msg = result.get("error") or result.get("message") or "Unknown error occurred"
-                st.error(f"❌ {error_msg}")
-
-        st.divider()
-
-        # Display database schema
-        if st.session_state.api_initialized:
-            with st.expander("📋 View Database Schema"):
-                schema_info = api_get_schema()
-                st.text(schema_info)
-
-        st.divider()
-
-        # Quick Actions Panel
-        st.subheader("⚡ Quick Actions")
-
-        # Database queries
-        with st.expander("💾 Database Queries", expanded=False):
-            db_queries = [
-                "Show me all portfolios",
-                "Which stock has the highest profit?",
-                "What are my top 5 holdings?",
-            ]
-            for query in db_queries:
-                if st.button(query, key=f"db_{query}", use_container_width=True):
-                    st.session_state.example_query = query
-
-        # Comparison queries
-        with st.expander("🔄 Comparison Queries", expanded=False):
-            comparison_queries = [
-                "Compare my portfolio to S&P 500",
-                "How does my portfolio perform against NASDAQ?",
-                "Compare A-Balanced returns vs market benchmark",
-                "Is my portfolio outperforming the market this year?",
-            ]
-            for query in comparison_queries:
-                if st.button(query, key=f"comp_{query}", use_container_width=True):
-                    st.session_state.example_query = query
-
-        # Internet data queries
-        with st.expander("🌐 Real-Time Data", expanded=False):
-            internet_queries = [
-                "What's the current price of Tesla?",
-                "Give me the latest news on Apple",
-                "What's the S&P 500 performance today?",
-                "What's Bitcoin's price?",
-            ]
-            for query in internet_queries:
-                if st.button(query, key=f"internet_{query}", use_container_width=True):
-                    st.session_state.example_query = query
-
-        # General queries
-        with st.expander("💬 General", expanded=False):
-            general_queries = [
-                "Hello!",
-                "What can you help me with?",
-            ]
-            for query in general_queries:
-                if st.button(query, key=f"general_{query}", use_container_width=True):
-                    st.session_state.example_query = query
-
-        st.divider()
-
-        # Configuration info
-        with st.expander("ℹ️ Configuration Details"):
-            st.json({
-                "Ollama Model": ollama_config['model_name'],
-                "API URL": API_BASE_URL,
-                "Max Result Rows": os.getenv("MAX_RESULT_ROWS", 100),
-                "Query Timeout": f"{os.getenv('QUERY_TIMEOUT', 30)} seconds",
-            })
-
-        st.divider()
-
-        # Chat Management Section
-        st.subheader("💬 Chat Management")
-
-        # Display chat statistics from API
-        if st.session_state.messages:
-            stats = api_get_stats()
-            if "error" not in stats:
-                st.metric("Total Queries", stats.get("total", 0))
-
+                st.error("❌ " + message)
+    
+    # Status indicator
+    if st.session_state.initialized:
+        st.success("🟢 API Connected")
+    else:
+        st.warning("🟡 API Not Initialized")
+    
+    # Streaming toggle
+    streaming_enabled = st.toggle("Enable Streaming", value=ENABLE_STREAMING)
+    
+    st.divider()
+    
+    # Clear chat button
+    if st.button("🗑️ Clear Chat"):
+        st.session_state.messages = []
+        st.rerun()
+    
+    st.divider()
+    
+    # Stats display
+    if st.session_state.initialized:
+        try:
+            stats_response = requests.get(f"{API_BASE_URL}/stats", timeout=5)
+            if stats_response.status_code == 200:
+                stats = stats_response.json()
+                st.subheader("📈 Query Statistics")
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.metric("💾 DB", stats.get("database", 0))
-                    st.metric("🌐 Web", stats.get("internet_data", 0))
+                    st.metric("Database", stats.get("database", 0))
+                    st.metric("Internet", stats.get("internet_data", 0))
                 with col2:
-                    st.metric("🔄 Compare", stats.get("comparison", 0))
-                    st.metric("💬 Chat", stats.get("greeting", 0))
+                    st.metric("Greeting", stats.get("greeting", 0))
+                    st.metric("Comparison", stats.get("comparison", 0))
+                st.metric("Total", stats.get("total", 0))
+        except:
+            pass
 
-            st.divider()
-
-            # Export options
-            st.caption("📥 Export Chat History:")
-            col1, col2 = st.columns(2)
-
-            with col1:
-                if st.button("📄 Export TXT", use_container_width=True):
-                    result = api_export_chat(st.session_state.messages, "txt")
-                    if result.get("success"):
-                        st.download_button(
-                            label="⬇️ Download TXT",
-                            data=result["content"],
-                            file_name=result["filename"],
-                            mime="text/plain",
-                            use_container_width=True
-                        )
-
-            with col2:
-                if st.button("📋 Export JSON", use_container_width=True):
-                    result = api_export_chat(st.session_state.messages, "json")
-                    if result.get("success"):
-                        st.download_button(
-                            label="⬇️ Download JSON",
-                            data=result["content"],
-                            file_name=result["filename"],
-                            mime="application/json",
-                            use_container_width=True
-                        )
-
-        st.divider()
-
-        if st.button("🗑️ Clear Chat History", use_container_width=True):
-            st.session_state.messages = []
-            st.session_state.query_stats = {
-                "database": 0, 
-                "greeting": 0, 
-                "internet_data": 0,
-                "comparison": 0
-            }
-            # Reset API stats
-            api_request("/stats/reset", method="POST")
-            st.rerun()
-
-    # Check if API is initialized
-    if not st.session_state.api_initialized:
-        # Check if API is already initialized on the backend
-        health = api_request("/health")
-        if health.get("initialized"):
-            st.session_state.api_initialized = True
+# Display chat messages
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        if message["role"] == "user":
+            st.markdown(message["content"])
         else:
-            st.warning("⚠️ Please initialize the chatbot using the sidebar.")
-            st.info("Click the '🔄 Initialize/Reinitialize' button to start.")
+            st.text(message["content"])
+        
+        # Show SQL query if available
+        if message.get("sql_query"):
+            with st.expander("🔍 SQL Query"):
+                st.code(message["sql_query"], language="sql")
+        
+        # Show results table if available
+        if message.get("results"):
+            with st.expander("📋 Results Table"):
+                st.dataframe(message["results"])
 
-            st.markdown("### 📋 Before You Start:")
-            st.markdown("""
-            1. Make sure the FastAPI backend is running: `uvicorn api:app --reload`
-            2. Make sure PostgreSQL is running
-            3. Make sure Ollama is running with the specified model
-            4. Click 'Initialize/Reinitialize' in the sidebar
-            """)
-            
-            st.markdown("### 🆕 New Feature: Comparison Queries")
-            st.markdown("""
-            You can now compare your local portfolio data with external market data!
-            
-            **Example queries:**
-            - "Compare my portfolio to S&P 500"
-            - "How does my portfolio perform against the market?"
-            - "Is my portfolio outperforming NASDAQ this year?"
-            """)
-            return
+# Auto-initialize on first load
+if not st.session_state.initialized:
+    with st.spinner("Connecting to API..."):
+        success, message = initialize_api()
+        if success:
+            st.session_state.initialized = True
+            st.toast("✅ API Connected!")
+        else:
+            st.warning(f"⚠️ Could not auto-initialize: {message}. Click 'Initialize API' in the sidebar.")
 
-    # Display chat history
-    display_chat_history()
-
-    # Handle example query selection
-    if "example_query" in st.session_state:
-        user_input = st.session_state.example_query
-        del st.session_state.example_query
+# Chat input
+if question := st.chat_input("Ask a question about your portfolio or financial data..."):
+    if not st.session_state.initialized:
+        st.warning("Please initialize the API first using the button in the sidebar.")
     else:
-        user_input = st.chat_input("Ask a question about your data...")
-
-    # Process user input
-    if user_input:
-        # Add user message to chat with timestamp
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        st.session_state.messages.append({
-            "role": "user",
-            "content": user_input,
-            "timestamp": timestamp
-        })
-
+        # Add user message
+        st.session_state.messages.append({"role": "user", "content": question})
+        
+        # Display user message
         with st.chat_message("user"):
-            st.caption(f"🕒 {timestamp}")
-            st.markdown(user_input)
-
-        # Route the query via API
-        with st.spinner("🤔 Understanding your question..."):
-            query_type = api_classify_query(user_input)
-
-        # Show query type with appropriate icon
-        type_icons = {
-            "database": "💾",
-            "greeting": "💬",
-            "internet_data": "🌐",
-            "comparison": "🔄"
-        }
-        icon = type_icons.get(query_type, "❓")
-        st.info(f"{icon} Query Type: **{query_type}**")
-
-        # Process based on type
+            st.markdown(question)
+        
+        # Process query and display assistant response
         with st.chat_message("assistant"):
-            response = process_query(query_type, user_input)
+            if streaming_enabled:
+                result = process_streaming_query(question)
+            else:
+                result = process_non_streaming_query(question)
+            
+            if result:
+                # Store the response with metadata
+                assistant_message = {
+                    "role": "assistant",
+                    "content": result.get("final_answer", ""),
+                    "sql_query": result.get("sql_query"),
+                    "results": result.get("results"),
+                    "query_type": result.get("query_type")
+                }
+                st.session_state.messages.append(assistant_message)
+                
+                # Show SQL query expander if available
+                if result.get("sql_query"):
+                    with st.expander("🔍 SQL Query"):
+                        st.code(result["sql_query"], language="sql")
+                
+                # Show results table if available
+                if result.get("results"):
+                    with st.expander("📋 Results Table"):
+                        st.dataframe(result["results"])
 
-            # Display response
-            st.markdown(response["content"])
-
-            # Display SQL query if present
-            if response.get("sql_query"):
-                with st.expander("🔍 View SQL Query"):
-                    st.code(response["sql_query"], language="sql")
-
-            # Display results dataframe if present
-            if response.get("results_df") is not None:
-                with st.expander("📊 View Results Table"):
-                    st.dataframe(response["results_df"], use_container_width=True)
-
-            # Display comparison details if present
-            if response.get("comparison_plan"):
-                with st.expander("🔄 View Comparison Details"):
-                    st.json(response["comparison_plan"])
-
-        # Add assistant response to history with timestamp
-        assistant_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        message_entry = {
-            "role": "assistant",
-            "content": response["content"],
-            "sql_query": response.get("sql_query"),
-            "results_df": response.get("results_df"),
-            "timestamp": assistant_timestamp,
-            "query_type": query_type
-        }
-        
-        # Add comparison-specific data if present
-        if query_type == "comparison":
-            message_entry["comparison_plan"] = response.get("comparison_plan")
-            message_entry["local_data"] = response.get("local_data")
-            message_entry["external_data"] = response.get("external_data")
-        
-        st.session_state.messages.append(message_entry)
-
-
-if __name__ == "__main__":
-    main()
+# Footer
+st.markdown("---")
+st.markdown("""
+    <div style="text-align: center; color: #666;">
+        <p>TraderBot - Financial Assistant v1.0.1</p>
+    </div>
+""", unsafe_allow_html=True)

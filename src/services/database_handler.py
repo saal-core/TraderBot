@@ -566,3 +566,44 @@ Since you cannot safely calculate the stock's percentage return (due to buy/sell
             print(f"❌ Error explaining results: {e}")
             return "I found the results but had trouble explaining them."
 
+    def stream_explain_results(self, query: str, results_df, sql_query: str):
+        """
+        Stream a natural language explanation of query results.
+        Uses QWEN (H100) for faster explanations with streaming.
+
+        Args:
+            query: Original user question
+            results_df: Pandas DataFrame with results
+            sql_query: The SQL query that was executed
+
+        Yields:
+            String chunks of the explanation
+        """
+        # Use TOON format for token-efficient results representation
+        results_text = format_query_results(results_df) if results_df is not None and not results_df.empty else "No results found"
+
+        explain_prompt = PromptTemplate(
+            input_variables=["query", "results", "sql_query", "today_date"],
+            template=DATABASE_EXPLANATION_PROMPT
+        )
+
+        explain_chain = explain_prompt | self.explanation_llm | StrOutputParser()
+
+        try:
+            print(f"⏱️  [QWEN H100] Starting: Streaming Results Explanation...")
+
+            # Get today's date for context
+            today_date = datetime.now().strftime("%A, %B %d, %Y")
+
+            for chunk in explain_chain.stream({
+                "query": query,
+                "results": results_text,
+                "sql_query": sql_query,
+                "today_date": today_date
+            }):
+                yield chunk
+
+            print(f"✅ [QWEN H100] Completed: Streaming Explanation")
+        except Exception as e:
+            print(f"❌ Error streaming explanation: {e}")
+            yield "I found the results but had trouble explaining them."

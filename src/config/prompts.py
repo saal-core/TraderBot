@@ -67,6 +67,8 @@ Interpret and explain the data **from the user's perspective**. Your job is to a
 6. **Format nicely** - Use bullet points or brief paragraphs for clarity when appropriate
 7. **No code or SQL** - Never include code, SQL, or technical syntax in your response
 8. **Use date context** - When discussing "today", "this week", "YTD", etc., use the provided date for context
+9. **NO MARKDOWN for currency** - Do NOT use Latex formatting (like $...$) for currency. write "$100", not "$100" with latex. Ensure spaces between numbers and words.
+10. **Formatting** - Use bolding for key figures but avoid complex markdown.
 
 **Response:**"""
 
@@ -93,6 +95,8 @@ Interpret and explain the data **from the user's perspective**. Your job is to a
 6. **Keep it concise** - Don't repeat all the raw data, summarize the key points
 7. **If data is missing or incomplete** - Acknowledge it naturally without being overly technical
 8. **Use date context** - When discussing "today", "this week", performance periods, use the provided date for context
+9. **NO MARKDOWN for currency** - Do NOT use Latex formatting (like $...$) for currency. Write "$100" directly.
+10. **Plain Text Preferred** - Avoid complex markdown. Use simple bullet points. Ensure spaces between numbers and words.
 
 **Response:**"""
 

@@ -101,6 +101,36 @@ class QwenExplanationService:
             print(f"❌ [QWEN H100] Error explaining results: {e}")
             return f"Error: {e}", elapsed
     
+    def stream_explain_results(self, query: str, results_df, sql_query: str):
+        """
+        Stream a natural language explanation of query results.
+        
+        Args:
+            query: Original user question
+            results_df: Pandas DataFrame with results
+            sql_query: The SQL query that was executed
+            
+        Yields:
+            String chunks of the explanation
+        """
+        # Use TOON format for token-efficient results representation
+        results_text = format_query_results(results_df) if results_df is not None and not results_df.empty else "No results found"
+        
+        try:
+            print(f"⏱️  [QWEN H100] Starting: Streaming Results Explanation...")
+            
+            for chunk in self.explain_chain.stream({
+                "query": query,
+                "results": results_text,
+                "sql_query": sql_query
+            }):
+                yield chunk
+                
+            print(f"✅ [QWEN H100] Completed: Streaming Explanation")
+        except Exception as e:
+            print(f"❌ [QWEN H100] Error streaming explanation: {e}")
+            yield f"Error: {e}", elapsed
+    
     def test_connection(self) -> tuple[bool, str, float]:
         """
         Test the QWEN API connection.

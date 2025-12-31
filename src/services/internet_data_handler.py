@@ -914,3 +914,40 @@ You can also ask about current prices, market performance, or other financial da
             print(f"❌ Error explaining internet data: {e}")
             # Fallback to returning the raw data if explanation fails
             return raw_data
+
+    def stream_explain_internet_data(self, query: str, raw_data: str):
+        """
+        Stream a natural language explanation of internet data.
+
+        Args:
+            query: Original user question
+            raw_data: The raw data/response fetched from internet sources
+
+        Yields:
+            String chunks of the explanation
+        """
+        explain_prompt = PromptTemplate(
+            input_variables=["query", "data", "today_date"],
+            template=INTERNET_DATA_EXPLANATION_PROMPT
+        )
+
+        explain_chain = explain_prompt | self.explanation_llm | StrOutputParser()
+
+        try:
+            print(f"⏱️  [{self.llm_type}] Starting: Streaming Internet Data Explanation...")
+
+            # Get today's date for context
+            today_date = datetime.now().strftime("%A, %B %d, %Y")
+
+            for chunk in explain_chain.stream({
+                "query": query,
+                "data": raw_data,
+                "today_date": today_date
+            }):
+                yield chunk
+
+            print(f"✅ [{self.llm_type}] Completed: Streaming Internet Data Explanation")
+        except Exception as e:
+            print(f"❌ Error streaming internet data explanation: {e}")
+            # Fallback to returning the raw data if streaming fails
+            yield raw_data
