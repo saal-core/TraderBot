@@ -7,15 +7,23 @@ from src.services.fmp_service import FMPService
 from src.services.perplexity_service import PerplexityService
 from src.services.chat_memory import ChatMemory
 from langchain_community.llms import Ollama
+from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from src.config.settings import get_ollama_config
 from src.config.prompts import INTERNET_DATA_EXPLANATION_PROMPT
 import time
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 class InternetDataHandler:
-    """Handles internet-based financial data fetching using FMP API with intelligent query processing."""
+    """Handles internet-based financial data fetching using FMP API with intelligent query processing.
+    
+    Uses Qwen3-30B-3B on H100 for explanation generation (optimized for speed and quality).
+    """
 
     def __init__(self, memory_max_pairs: int = 5):
         """
@@ -23,6 +31,10 @@ class InternetDataHandler:
 
         Args:
             memory_max_pairs: Maximum number of Q&A pairs to remember
+            
+        Note:
+            Internet data explanations always use Qwen H100 for optimal performance.
+            If Qwen is unavailable, falls back to Ollama (gpt-oss:20b).
         """
         self.fmp = FMPService()
         self.perplexity = PerplexityService()
@@ -36,12 +48,14 @@ class InternetDataHandler:
             temperature=0.2
         )
 
-        # Initialize explainer LLM (can use same model but with different temperature)
-        self.explanation_llm = Ollama(
-            model="gpt-oss:20b",  # Use gpt-oss for better explanations
-            base_url=ollama_config["base_url"],
+        # Initialize explanation LLM: Always use Qwen H100 for faster explanations
+        self.explanation_llm = ChatOpenAI(
+            model="Qwen3-30B-A3B",
+            base_url=os.getenv("QWEN_BASE_URL", "http://192.168.71.72:8080/v1"),
+            api_key=os.getenv("QWEN_API_KEY", "123"),
             temperature=0.3
         )
+        self.llm_type = "Qwen H100"
 
         # Symbol name mapping for common companies
         self.company_to_symbol = {
@@ -881,7 +895,7 @@ You can also ask about current prices, market performance, or other financial da
 
         try:
             start_time = time.time()
-            print(f"⏱️  Starting: Internet Data Explanation...")
+            print(f"⏱️  [{self.llm_type}] Starting: Internet Data Explanation...")
 
             # Get today's date for context
             today_date = datetime.now().strftime("%A, %B %d, %Y")
@@ -893,7 +907,7 @@ You can also ask about current prices, market performance, or other financial da
             })
 
             elapsed = time.time() - start_time
-            print(f"✅ Completed: Internet Data Explanation in {elapsed:.2f}s")
+            print(f"✅ [{self.llm_type}] Completed: Internet Data Explanation in {elapsed:.2f}s")
 
             return explanation.strip()
         except Exception as e:

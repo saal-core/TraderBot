@@ -165,6 +165,7 @@ async def initialize():
         app_state.router = OptimizedQueryRouter(sql_executor=app_state.sql_executor)
         app_state.db_handler = DatabaseQueryHandler(sql_executor=app_state.sql_executor)
         app_state.greeting_handler = GreetingHandler()
+        # Initialize InternetDataHandler - uses Qwen H100 by default for faster explanations
         app_state.internet_data_handler = InternetDataHandler()
         app_state.chat_memory = ChatMemory(max_pairs=5)
         
