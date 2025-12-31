@@ -1,5 +1,7 @@
-
-from typing import Dict, List, Tuple, Optional
+"""
+Database Query Handler - Generates SQL and explains results using QWEN streaming
+"""
+from typing import Dict, List, Tuple, Optional, Generator
 from langchain_community.llms import Ollama
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
@@ -22,6 +24,7 @@ load_dotenv()
 # TOON formatter for token-efficient data formatting
 from src.utils.toon_formatter import format_query_results, format_symbol_list
 
+
 class DatabaseQueryHandler:
     """Handles database-related queries by generating SQL using custom prompt"""
 
@@ -33,7 +36,7 @@ class DatabaseQueryHandler:
             model_name: Name of the model to use (defaults to config)
             use_openai: Whether to use OpenAI for SQL generation (True) or Ollama (False)
             sql_executor: Optional SQL executor for fetching dynamic data
-            memory_max_pairs: Maximum number of Q&A pairs to remember for follow-up questions (default: 3)
+            memory_max_pairs: Maximum number of Q&A pairs to remember for follow-up questions
         """
         self.sql_executor = sql_executor
         self._symbols_cache = None
@@ -65,11 +68,12 @@ class DatabaseQueryHandler:
         # Use QWEN (H100) for explanations - faster than local Ollama
         qwen_config = get_qwen_config()
         self.explanation_llm = ChatOpenAI(
-            model="Qwen3-30B-A3B",
+            model=qwen_config.get("model_name", "Qwen3-30B-A3B"),
             base_url=qwen_config["base_url"],
             api_key=qwen_config["api_key"],
-            temperature=0.3,
-            max_retries=2
+            temperature=qwen_config.get("temperature", 0.3),
+            max_retries=2,
+            streaming=True  # Enable streaming
         )
 
         # Initialize alias resolver for privacy-preserving placeholder generation
@@ -86,6 +90,12 @@ class DatabaseQueryHandler:
 
         self.sql_chain = self.sql_prompt | self.llm | StrOutputParser()
 
+        # Explanation prompt
+        self.explain_prompt = PromptTemplate(
+            input_variables=["query", "results", "sql_query", "today_date"],
+            template=DATABASE_EXPLANATION_PROMPT
+        )
+
     def _load_custom_prompt(self) -> str:
         """Load custom prompt from test2sql_prompt.md"""
         prompt_file = "/home/dev/Hussein/trader_bot_enhance/test2sql_prompt.md"
@@ -93,12 +103,10 @@ class DatabaseQueryHandler:
         if os.path.exists(prompt_file):
             with open(prompt_file, 'r', encoding='utf-8') as f:
                 prompt_content = f.read()
-                print("="*20 +"\nLoaded custom SQL prompt template."+"\n"+"="*20)
+                print("=" * 20 + "\nLoaded custom SQL prompt template.\n" + "=" * 20)
         else:
-            # Fallback to basic prompt if file not found
             prompt_content = """You are a PostgreSQL SQL expert. Generate a SQL query based on the user's question and database schema."""
 
-        # Add the dynamic sections and output instructions
         full_template = f"""{prompt_content}
 
 ---
@@ -131,11 +139,10 @@ Use these placeholders EXACTLY as shown in your SQL WHERE clauses.
 
 **PLACEHOLDER USAGE RULES:**
 - ONLY use placeholders that are explicitly listed in "Resolved Entities" above
-- If "Resolved Entities" says "No specific portfolio or account mentioned", do NOT use any :PORTFOLIO_N or :ACCOUNT_N placeholders - query all data instead
+- If "Resolved Entities" says "No specific portfolio or account mentioned", do NOT use any :PORTFOLIO_N or :ACCOUNT_N placeholders
 - When placeholders are provided: Use them directly in WHERE clauses: `WHERE portfolio_name = :PORTFOLIO_1`
 - Do NOT wrap placeholders in quotes: Use `:PORTFOLIO_1` not `':PORTFOLIO_1'`
 - Do NOT invent or create placeholders - only use what is provided above
-- Generic phrases like "the portfolio", "my portfolio", or "the account" without a resolved placeholder means query ALL portfolios/accounts
 
 ---
 
@@ -147,44 +154,8 @@ Use these placeholders EXACTLY as shown in your SQL WHERE clauses.
 - Return only the SQL query without any explanation or markdown
 - Use proper PostgreSQL syntax
 - Always use schema prefix: `ai_trading.table_name`
-- For "current" or "latest" data, filter by: `WHERE datetime = (SELECT MAX(datetime) FROM ai_trading.table_name)`
-- Pay attention to SQL query syntax and correctness
-- Take care of comparisons between portfolio names and stocks or group name or account ids
+
 ---
-
-### **8. Comparison Guidelines**:
-### **Strategic Logic: Portfolio vs. Stock Comparison**
-
-**The Core Problem:**
-
-  * **Portfolios** (in `portfolio_summary`) have explicit **Percentage Return** metrics (e.g., `ytd_return`).
-  * **Stocks** (in `portfolio_holdings`) **DO NOT** have a pre-calculated percentage return column. They only have **Dollar Value** and **Dollar Profit** (`ytd_total_pnl`).
-
-**The Rule:**
-**"Compare Apples to Apples (Dollars to Dollars)."**
-Since you cannot safely calculate the stock's percentage return (due to buy/sell timing affecting the cost basis), you must compare them based on **Total Profit (PnL)** or **Market Value**.
-
------
-
-### **Step-by-Step Execution Plan**
-
-1.  **Identify the Entities:**
-
-      * **Entity A (Portfolio):** "A-Balanced" $\rightarrow$ Source: `ai_trading.portfolio_summary`
-      * **Entity B (Stock):** "QQQ" $\rightarrow$ Source: `ai_trading.portfolio_holdings_realized_pnl` (Use this table because it captures Total PnL = Realized + Unrealized).
-
-2.  **Select the Common Metric:**
-
-      * **Metric:** **Year-to-Date Profit (YTD PnL)**.
-      * *Portfolio Mapping:* `ytd_profit`
-      * *Stock Mapping:* `ytd_total_pnl` (This is the equivalent of `ytd_profit` for a specific stock).
-
-3.  **Construct the Query:**
-
-      * Use a **Common Table Expression (CTE)** for each entity to ensure you get the `MAX(datetime)` for both independently.
-      * Join them on `1=1` (Cross Join) since they are unrelated entities, just to display them in one row.
-
------
 
 ### **User Question:**
 
@@ -195,31 +166,20 @@ Since you cannot safely calculate the stock's percentage return (due to buy/sell
         return full_template
 
     def _format_conversation_history(self, chat_history: List[Dict[str, str]]) -> str:
-        """
-        Format conversation history for SQL generation context
-
-        Args:
-            chat_history: List of previous messages
-
-        Returns:
-            Formatted conversation history string
-        """
+        """Format conversation history for SQL generation context"""
         if not chat_history:
             return "No previous conversation (this is the first question)."
 
-        # Get last 3 Q&A pairs using chat memory
         recent_messages = self.chat_memory.get_context_messages(chat_history)
 
         if not recent_messages:
             return "No previous conversation (this is the first question)."
 
-        # Format as Q&A pairs for better context
         formatted_lines = []
         for msg in recent_messages:
             role = msg.get("role", "").capitalize()
             content = msg.get("content", "")
 
-            # Truncate very long responses to keep context manageable
             if len(content) > 200:
                 content = content[:200] + "..."
 
@@ -227,54 +187,8 @@ Since you cannot safely calculate the stock's percentage return (due to buy/sell
 
         return "\n".join(formatted_lines)
 
-    def _get_portfolio_names(self) -> str:
-        """Fetch distinct portfolio names from database"""
-        if not self.sql_executor:
-            return "N/A"
-
-
-        query = """
-        SELECT DISTINCT portfolio_name
-        FROM ai_trading.portfolio_summary
-        ORDER BY portfolio_name
-        LIMIT 50
-        """
-        success, df, _ = self.sql_executor.execute_query(query)
-        print(f"*************Portfolio names query success*****************: {success}")
-        if success and df is not None and not df.empty:
-            names = df['portfolio_name'].tolist()
-            return ", ".join([f"'{name}'" for name in names])
-        return "N/A"
-
-
-    def _get_account_ids(self) -> str:
-        """Fetch distinct account IDs from database"""
-        if not self.sql_executor:
-            return "N/A"
-
-        try:
-            query = """
-            SELECT DISTINCT account_id
-            FROM ai_trading.portfolio_summary
-            ORDER BY account_id
-            LIMIT 100
-            """
-            success, df, _ = self.sql_executor.execute_query(query)
-            if success and df is not None and not df.empty:
-                account_ids = df['account_id'].tolist()
-                return ", ".join([f"'{aid}'" for aid in account_ids])
-            return "N/A"
-        except:
-            return "N/A"
-
     def _get_all_symbols_dict(self) -> Dict[str, str]:
-        """
-        Fetch all symbols from database and return as dictionary
-        Uses cache to avoid repeated queries
-
-        Returns:
-            Dictionary with id as key and symbol as value
-        """
+        """Fetch all symbols from database and return as dictionary"""
         if self._symbols_cache is not None:
             return self._symbols_cache
 
@@ -290,7 +204,6 @@ Since you cannot safely calculate the stock's percentage return (due to buy/sell
             """
             success, df, _ = self.sql_executor.execute_query(query)
             if success and df is not None and not df.empty:
-                # Create dictionary with index as id
                 symbols_dict = {str(i): symbol for i, symbol in enumerate(df['symbol'].tolist())}
                 self._symbols_cache = symbols_dict
                 return symbols_dict
@@ -300,15 +213,7 @@ Since you cannot safely calculate the stock's percentage return (due to buy/sell
             return {}
 
     def _extract_stock_mentions(self, query: str) -> List[str]:
-        """
-        Extract potential stock mentions from query using LLM
-
-        Args:
-            query: User's question
-
-        Returns:
-            List of potential stock names/symbols mentioned
-        """
+        """Extract potential stock mentions from query using LLM"""
         extraction_prompt = PromptTemplate(
             input_variables=["query"],
             template=STOCK_EXTRACTION_PROMPT
@@ -330,7 +235,6 @@ Since you cannot safely calculate the stock's percentage return (due to buy/sell
             if result.upper() == "NONE" or not result:
                 return []
 
-            # Split by comma and clean
             terms = [term.strip() for term in result.split(',') if term.strip()]
             return terms
         except Exception as e:
@@ -338,36 +242,22 @@ Since you cannot safely calculate the stock's percentage return (due to buy/sell
             return []
 
     def _match_symbol_from_list(self, extracted_term: str, all_symbols_list: List[str]) -> Optional[str]:
-        """
-        Use LLM to find the best matching symbol from the list for the extracted term.
-        
-        Args:
-            extracted_term: The term extracted from user query (e.g. "Apple")
-            all_symbols_list: List of all available symbols in database
-            
-        Returns:
-            The matching symbol or None if no match found
-        """
+        """Use LLM to find the best matching symbol from the list"""
         if not extracted_term or not all_symbols_list:
             return None
-            
-        # Create a TOON formatted symbol list for token efficiency
-        # TOON format reduces tokens by ~40% for large lists
+
         symbols_str = format_symbol_list(all_symbols_list)
-        
+
         match_prompt = PromptTemplate(
             input_variables=["term", "symbols"],
             template=SYMBOL_MATCHING_PROMPT
         )
-        
+
         match_chain = match_prompt | self.llm | StrOutputParser()
 
         try:
             start_time = time.time()
-            print(f"⏱️  Starting: Symbol Matching for '{extracted_term}' (TOON format)...")
-
-            # Using TOON format for token efficiency
-            # We skip fuzzy pre-filtering because it misses cases like "Apple" -> "AAPL" (score ~22)
+            print(f"⏱️  Starting: Symbol Matching for '{extracted_term}'...")
 
             result = match_chain.invoke({
                 "term": extracted_term,
@@ -387,19 +277,8 @@ Since you cannot safely calculate the stock's percentage return (due to buy/sell
             print(f"❌ Error matching symbol: {e}")
             return None
 
-
     def _fuzzy_match_symbols(self, mentioned_terms: List[str], symbols_dict: Dict[str, str], threshold: int = 70) -> str:
-        """
-        Match mentioned terms to actual symbols using LLM selection from list
-        
-        Args:
-            mentioned_terms: List of terms extracted from query
-            symbols_dict: Dictionary of all available symbols
-            threshold: Unused in new logic but kept for signature compatibility
-            
-        Returns:
-            String with matched symbols information
-        """
+        """Match mentioned terms to actual symbols using LLM selection"""
         if not mentioned_terms or not symbols_dict:
             return "No stock symbols detected in the question"
 
@@ -407,15 +286,10 @@ Since you cannot safely calculate the stock's percentage return (due to buy/sell
         matched_info = []
 
         for term in mentioned_terms:
-            # Use new LLM matching logic
             matched_symbol = self._match_symbol_from_list(term, symbols_list)
-            
+
             if matched_symbol:
                 matched_info.append(f"'{term}' -> '{matched_symbol}'")
-            else:
-                # Fallback to simple fuzzy if LLM fails or returns nothing? 
-                # Or just report no match. Let's report no match to avoid bad data.
-                pass
 
         if matched_info:
             return "Detected stock mentions:\n" + "\n".join(matched_info)
@@ -424,12 +298,7 @@ Since you cannot safely calculate the stock's percentage return (due to buy/sell
 
     def generate_sql(self, query: str, schema: str, chat_history: List[Dict[str, str]] = None) -> str:
         """
-        Generate SQL query from natural language question with fuzzy stock matching and conversation context.
-        
-        Uses privacy-preserving placeholder approach:
-        1. Resolve portfolio/account references to placeholders using local LLM
-        2. Send placeholders (not actual names) to OpenAI for SQL generation
-        3. Substitute actual values into SQL after generation
+        Generate SQL query from natural language question with fuzzy stock matching.
 
         Args:
             query: User's natural language question
@@ -445,22 +314,20 @@ Since you cannot safely calculate the stock's percentage return (due to buy/sell
         # Phase 1: Resolve entities using local LLM (privacy-preserving)
         print("🔒 Phase 1: Resolving portfolio/account references locally...")
         entity_resolution = self.alias_resolver.resolve_entities(query)
-        
-        # Use rewritten query with placeholders
+
         rewritten_query = entity_resolution.rewritten_query
         placeholder_map = entity_resolution.placeholder_map
         entity_placeholders = entity_resolution.placeholder_info
-        
+
         if placeholder_map:
             print(f"  → Placeholder map: {placeholder_map}")
             print(f"  → Rewritten query: {rewritten_query}")
         else:
             print("  → No specific portfolio/account mentioned")
 
-        # Format conversation history for context
         conversation_text = self._format_conversation_history(chat_history)
 
-        # Check for stock mentions and fuzzy match
+        # Check for stock mentions
         print("  → Checking for stock mentions...")
         mentioned_terms = self._extract_stock_mentions(query)
 
@@ -471,16 +338,16 @@ Since you cannot safely calculate the stock's percentage return (due to buy/sell
             matched_symbols = self._fuzzy_match_symbols(mentioned_terms, symbols_dict)
             print(f"  → {matched_symbols}")
 
-        # Phase 2: Generate SQL with placeholders (OpenAI - no actual names exposed)
+        # Phase 2: Generate SQL with placeholders
         start_time = time.time()
-        print(f"⏱️  Phase 2: SQL Query Generation (with placeholders)...")
+        print(f"⏱️  Phase 2: SQL Query Generation...")
 
         sql = self.sql_chain.invoke({
             "schema": schema,
             "entity_placeholders": entity_placeholders,
             "matched_symbols": matched_symbols,
             "conversation_history": conversation_text,
-            "query": rewritten_query  # Use rewritten query with placeholders
+            "query": rewritten_query
         })
 
         elapsed = time.time() - start_time
@@ -488,43 +355,37 @@ Since you cannot safely calculate the stock's percentage return (due to buy/sell
 
         # Clean up the response
         sql = sql.strip()
-
-        # Remove markdown code blocks if present
         if sql.startswith("```"):
             lines = sql.split("\n")
             sql = "\n".join([line for line in lines if not line.startswith("```") and "sql" not in line.lower()])
-
         sql = sql.strip()
+
         print(f"  → Generated SQL (with placeholders): {sql}")
 
         # Phase 3: Substitute placeholders with actual values
         if placeholder_map:
-            print(f"🔓 Phase 3: Substituting placeholders with actual values...")
+            print(f"🔓 Phase 3: Substituting placeholders...")
             sql = self.alias_resolver.substitute_placeholders(sql, placeholder_map)
             print(f"  → Final SQL: {sql}")
-        
-        # Validate that no unsubstituted placeholders remain
+
+        # Validate no unsubstituted placeholders remain
         import re
         remaining_placeholders = re.findall(r':(PORTFOLIO_\d+|ACCOUNT_\d+)', sql)
         if remaining_placeholders:
-            print(f"⚠️  Warning: Unsubstituted placeholders found: {remaining_placeholders}")
-            # Try to substitute any remaining placeholders from the map
+            print(f"⚠️  Warning: Unsubstituted placeholders: {remaining_placeholders}")
             for placeholder in remaining_placeholders:
                 full_placeholder = f":{placeholder}"
                 if full_placeholder in placeholder_map:
                     actual_value = placeholder_map[full_placeholder]
                     sql = sql.replace(full_placeholder, f"'{actual_value}'")
-                    print(f"  → Fixed: {full_placeholder} → '{actual_value}'")
                 else:
-                    # Placeholder exists in SQL but not in map - likely entity resolution failed
-                    return f"ERROR: Could not resolve portfolio/account reference. Please specify the exact portfolio name (e.g., 'A-Balanced', 'Growth Fund')."
+                    return f"ERROR: Could not resolve portfolio/account reference."
 
         return sql
 
     def explain_results(self, query: str, results_df, sql_query: str) -> str:
         """
-        Generate a natural language explanation of query results.
-        Uses QWEN (H100) for faster explanations.
+        Generate a natural language explanation of query results (non-streaming).
 
         Args:
             query: Original user question
@@ -534,35 +395,95 @@ Since you cannot safely calculate the stock's percentage return (due to buy/sell
         Returns:
             Natural language explanation
         """
-        # Use TOON format for token-efficient results representation
         results_text = format_query_results(results_df) if results_df is not None and not results_df.empty else "No results found"
-
-        explain_prompt = PromptTemplate(
-            input_variables=["query", "results", "sql_query", "today_date"],
-            template=DATABASE_EXPLANATION_PROMPT
-        )
-
-        explain_chain = explain_prompt | self.explanation_llm | StrOutputParser()
 
         try:
             start_time = time.time()
             print(f"⏱️  [QWEN H100] Starting: Results Explanation Generation...")
 
-            # Get today's date for context
             today_date = datetime.now().strftime("%A, %B %d, %Y")
 
-            explanation = explain_chain.invoke({
-                "query": query,
-                "results": results_text,
-                "sql_query": sql_query,
-                "today_date": today_date
-            })
+            formatted_prompt = self.explain_prompt.format(
+                query=query,
+                results=results_text,
+                sql_query=sql_query,
+                today_date=today_date
+            )
+
+            explanation = self.explanation_llm.invoke(formatted_prompt)
 
             elapsed = time.time() - start_time
             print(f"✅ Completed: Results Explanation in {elapsed:.2f}s")
 
-            return explanation.strip()
+            # Handle AIMessage response
+            if hasattr(explanation, 'content'):
+                return explanation.content.strip()
+            return str(explanation).strip()
+
         except Exception as e:
             print(f"❌ Error explaining results: {e}")
             return "I found the results but had trouble explaining them."
 
+    def explain_results_streaming(self, query: str, results_df, sql_query: str) -> Generator[Dict, None, None]:
+        """
+        Generate a natural language explanation with streaming from QWEN.
+
+        Args:
+            query: Original user question
+            results_df: Pandas DataFrame with results
+            sql_query: The SQL query that was executed
+
+        Yields:
+            Dictionary containing:
+            {
+                "type": "chunk" | "metadata" | "error",
+                "content": str,
+                "elapsed_time": float (only for metadata)
+            }
+        """
+        results_text = format_query_results(results_df) if results_df is not None and not results_df.empty else "No results found"
+
+        try:
+            start_time = time.time()
+            print(f"⏱️  [QWEN H100] Starting: Results Explanation (Streaming)...")
+
+            today_date = datetime.now().strftime("%A, %B %d, %Y")
+
+            formatted_prompt = self.explain_prompt.format(
+                query=query,
+                results=results_text,
+                sql_query=sql_query,
+                today_date=today_date
+            )
+
+            # Stream from QWEN
+            for chunk in self.explanation_llm.stream(formatted_prompt):
+                # Handle different chunk formats
+                if hasattr(chunk, 'content') and chunk.content:
+                    yield {
+                        "type": "chunk",
+                        "content": chunk.content
+                    }
+                elif isinstance(chunk, str) and chunk:
+                    yield {
+                        "type": "chunk",
+                        "content": chunk
+                    }
+
+            elapsed = time.time() - start_time
+            print(f"✅ [QWEN H100] Completed: Results Explanation (Streaming) in {elapsed:.2f}s")
+
+            yield {
+                "type": "metadata",
+                "content": "",
+                "elapsed_time": elapsed
+            }
+
+        except Exception as e:
+            elapsed = time.time() - start_time if 'start_time' in locals() else 0
+            print(f"❌ Error explaining results (streaming): {e}")
+            yield {
+                "type": "error",
+                "content": f"Error generating explanation: {str(e)}",
+                "elapsed_time": elapsed
+            }
