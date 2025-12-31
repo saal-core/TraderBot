@@ -10,8 +10,9 @@ from typing import List, Dict, Any, Optional
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, status
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
+import asyncio
 import pandas as pd
 
 # Import models
@@ -30,7 +31,7 @@ from src.services.greating_handler import GreetingHandler
 from src.services.internet_data_handler import InternetDataHandler
 from src.services.comparison_handler import ComparisonHandler
 from src.services.chat_memory import ChatMemory
-from src.utils.response_cleaner import clean_llm_response
+from src.utils.response_cleaner import clean_llm_response, clean_llm_chunk
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -541,6 +542,206 @@ async def reset_stats():
     app_state.reset_stats()
     return {"success": True, "message": "Statistics reset"}
 
+
+# ============================================================================
+# Streaming SSE Endpoint
+# ============================================================================
+
+def generate_sse_event(event_type: str, data: Any) -> str:
+    """Generate a Server-Sent Event formatted string."""
+    event_data = {"type": event_type, "data": data}
+    if event_type == "content":
+        event_data = {"type": event_type, "content": data}
+    return f"data:{json.dumps(event_data)}\n\n"
+
+
+async def stream_query_response(query: str, chat_history: List[Dict[str, str]]):
+    """
+    Generator function that streams query processing updates.
+    
+    Yields SSE events for:
+    - status: Processing status updates
+    - content: Incremental content chunks
+    - assistant_message_complete: Final response with all data
+    - error: Error information
+    - stream_end: End of stream marker
+    """
+    try:
+        # Check initialization
+        if not app_state.initialized:
+            yield generate_sse_event("error", {"error": "Service not initialized. Call /initialize first."})
+            yield generate_sse_event("stream_end", {})
+            return
+        
+        # Step 1: Classify the query
+        yield generate_sse_event("status", {"message": "Classifying query..."})
+        await asyncio.sleep(0.01)  # Allow event to flush
+        
+        query_type = app_state.router.classify_query(query)
+        yield generate_sse_event("status", {"message": f"Query type: {query_type}"})
+        await asyncio.sleep(0.01)
+        
+        # Initialize response data
+        response_data = {
+            "success": True,
+            "query_type": query_type,
+            "sql_query": None,
+            "results": None,
+            "final_answer": ""
+        }
+        
+        # Step 2: Route to appropriate handler
+        if query_type == "greeting":
+            yield generate_sse_event("status", {"message": "Processing greeting..."})
+            await asyncio.sleep(0.01)
+            
+            response = app_state.greeting_handler.respond(query, chat_history)
+            cleaned_response = clean_response_content(response)
+            
+            # Stream content
+            yield generate_sse_event("content", cleaned_response)
+            response_data["final_answer"] = cleaned_response
+            app_state.query_stats["greeting"] += 1
+            
+        elif query_type == "database":
+            yield generate_sse_event("status", {"message": "Fetching database schema..."})
+            await asyncio.sleep(0.01)
+            
+            schema = app_state.sql_executor.get_schema_info()
+            if "Error" in schema:
+                yield generate_sse_event("error", {"error": f"Failed to retrieve schema: {schema}"})
+                yield generate_sse_event("stream_end", {})
+                return
+            
+            yield generate_sse_event("status", {"message": "Generating SQL query..."})
+            await asyncio.sleep(0.01)
+            
+            sql_query = app_state.db_handler.generate_sql(query, schema, chat_history)
+            
+            if sql_query.startswith("ERROR"):
+                yield generate_sse_event("error", {"error": sql_query})
+                yield generate_sse_event("stream_end", {})
+                return
+            
+            response_data["sql_query"] = sql_query
+            yield generate_sse_event("status", {"message": "Executing query..."})
+            await asyncio.sleep(0.01)
+            
+            success, results_df, message = app_state.sql_executor.execute_query(sql_query)
+            
+            if not success:
+                yield generate_sse_event("error", {"error": f"Query execution failed: {message}"})
+                yield generate_sse_event("stream_end", {})
+                return
+            
+            response_data["results"] = dataframe_to_list(results_df)
+            
+            yield generate_sse_event("status", {"message": "Generating explanation..."})
+            await asyncio.sleep(0.01)
+            
+            # Stream the explanation chunks
+            accumulated_explanation = ""
+            # Send emoji prefix first
+            yield generate_sse_event("content", "✅ ")
+            accumulated_explanation = "✅ "
+            await asyncio.sleep(0.01)
+            
+            for chunk in app_state.db_handler.stream_explain_results(query, results_df, sql_query):
+                cleaned_chunk = clean_llm_chunk(chunk) if chunk else ""
+                if cleaned_chunk:
+                    accumulated_explanation += cleaned_chunk
+                    yield generate_sse_event("content", cleaned_chunk)
+                    await asyncio.sleep(0.01)
+            
+            # Add the message at the end
+            accumulated_explanation += f"\n\n💡 {message}"
+            yield generate_sse_event("content", f"\n\n💡 {message}")
+            response_data["final_answer"] = accumulated_explanation
+            app_state.query_stats["database"] += 1
+            
+        elif query_type == "internet_data":
+            yield generate_sse_event("status", {"message": "Fetching internet data..."})
+            await asyncio.sleep(0.01)
+            
+            # Fetch raw data first
+            raw_data = app_state.internet_data_handler.fetch_raw_data(query, chat_history)
+            
+            if raw_data.startswith("Error"):
+                yield generate_sse_event("error", {"error": raw_data})
+                yield generate_sse_event("stream_end", {})
+                return
+            
+            yield generate_sse_event("status", {"message": "Generating explanation..."})
+            await asyncio.sleep(0.01)
+            
+            # Stream the explanation chunks
+            accumulated_response = ""
+            # Send emoji prefix first
+            yield generate_sse_event("content", "🌐 ")
+            accumulated_response = "🌐 "
+            await asyncio.sleep(0.01)
+            
+            for chunk in app_state.internet_data_handler.stream_explain_internet_data(query, raw_data):
+                cleaned_chunk = clean_llm_chunk(chunk) if chunk else ""
+                if cleaned_chunk:
+                    accumulated_response += cleaned_chunk
+                    yield generate_sse_event("content", cleaned_chunk)
+                    await asyncio.sleep(0.01)
+            
+            response_data["final_answer"] = accumulated_response
+            app_state.query_stats["internet_data"] += 1
+            
+        elif query_type == "comparison":
+            yield generate_sse_event("status", {"message": "Processing comparison query..."})
+            await asyncio.sleep(0.01)
+            
+            result = app_state.comparison_handler.process(query, chat_history)
+            cleaned_content = clean_response_content(result.get("content", ""))
+            
+            response_data["sql_query"] = result.get("sql_query")
+            response_data["results"] = dataframe_to_list(result.get("results_df"))
+            response_data["comparison_plan"] = result.get("comparison_plan")
+            response_data["local_data"] = result.get("local_data")
+            response_data["external_data"] = result.get("external_data")
+            
+            # Stream content
+            yield generate_sse_event("content", cleaned_content)
+            response_data["final_answer"] = cleaned_content
+            app_state.query_stats["comparison"] += 1
+            
+        else:
+            yield generate_sse_event("error", {"error": f"Unknown query type: {query_type}"})
+            yield generate_sse_event("stream_end", {})
+            return
+        
+        # Step 3: Send complete response
+        yield generate_sse_event("assistant_message_complete", response_data)
+        yield generate_sse_event("stream_end", {})
+        
+    except Exception as e:
+        yield generate_sse_event("error", {"error": str(e)})
+        yield generate_sse_event("stream_end", {})
+
+
+@app.post("/query/stream")
+async def stream_query(request: QueryRequest):
+    """
+    Stream query processing with Server-Sent Events.
+    
+    This endpoint classifies the query, routes it to the appropriate handler,
+    and streams progress updates and the final response back to the client.
+    """
+    chat_history = convert_chat_history(request.chat_history)
+    
+    return StreamingResponse(
+        stream_query_response(request.query, chat_history),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 # ============================================================================
 # Main entry point

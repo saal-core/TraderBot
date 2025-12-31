@@ -103,71 +103,37 @@ class QwenExplanationService:
             elapsed = time.time() - start_time if 'start_time' in locals() else 0
             print(f"❌ [QWEN H100] Error: {e}")
             return f"Error: {e}", elapsed
-
-    def explain_results_streaming(self, query: str, results_df, sql_query: str) -> Generator[Dict, None, None]:
+    
+    def stream_explain_results(self, query: str, results_df, sql_query: str):
         """
-        Generate a natural language explanation with streaming.
-
+        Stream a natural language explanation of query results.
+        
         Args:
             query: Original user question
             results_df: Pandas DataFrame with results
             sql_query: The SQL query that was executed
-
+            
         Yields:
-            Dictionary containing:
-            {
-                "type": "chunk" | "metadata" | "error",
-                "content": str,
-                "elapsed_time": float (only for metadata)
-            }
+            String chunks of the explanation
         """
+        # Use TOON format for token-efficient results representation
         results_text = format_query_results(results_df) if results_df is not None and not results_df.empty else "No results found"
-
+        
         try:
-            start_time = time.time()
-            print(f"⏱️  [QWEN H100] Starting: Results Explanation (Streaming)...")
-
-            from datetime import datetime
-            today_date = datetime.now().strftime("%A, %B %d, %Y")
-
-            formatted_prompt = self.explain_prompt.format(
-                query=query,
-                results=results_text,
-                sql_query=sql_query,
-                today_date=today_date
-            )
-
-            # Stream from QWEN
-            for chunk in self.llm.stream(formatted_prompt):
-                if hasattr(chunk, 'content') and chunk.content:
-                    yield {
-                        "type": "chunk",
-                        "content": chunk.content
-                    }
-                elif isinstance(chunk, str) and chunk:
-                    yield {
-                        "type": "chunk",
-                        "content": chunk
-                    }
-
-            elapsed = time.time() - start_time
-            print(f"✅ [QWEN H100] Completed: Streaming in {elapsed:.2f}s")
-
-            yield {
-                "type": "metadata",
-                "content": "",
-                "elapsed_time": elapsed
-            }
-
+            print(f"⏱️  [QWEN H100] Starting: Streaming Results Explanation...")
+            
+            for chunk in self.explain_chain.stream({
+                "query": query,
+                "results": results_text,
+                "sql_query": sql_query
+            }):
+                yield chunk
+                
+            print(f"✅ [QWEN H100] Completed: Streaming Explanation")
         except Exception as e:
-            elapsed = time.time() - start_time if 'start_time' in locals() else 0
-            print(f"❌ [QWEN H100] Error (streaming): {e}")
-            yield {
-                "type": "error",
-                "content": f"Error: {str(e)}",
-                "elapsed_time": elapsed
-            }
-
+            print(f"❌ [QWEN H100] Error streaming explanation: {e}")
+            yield f"Error: {e}", elapsed
+    
     def test_connection(self) -> tuple[bool, str, float]:
         """
         Test the QWEN API connection.

@@ -424,9 +424,10 @@ Use these placeholders EXACTLY as shown in your SQL WHERE clauses.
             print(f"❌ Error explaining results: {e}")
             return "I found the results but had trouble explaining them."
 
-    def explain_results_streaming(self, query: str, results_df, sql_query: str) -> Generator[Dict, None, None]:
+    def stream_explain_results(self, query: str, results_df, sql_query: str):
         """
-        Generate a natural language explanation with streaming from QWEN.
+        Stream a natural language explanation of query results.
+        Uses QWEN (H100) for faster explanations with streaming.
 
         Args:
             query: Original user question
@@ -434,56 +435,33 @@ Use these placeholders EXACTLY as shown in your SQL WHERE clauses.
             sql_query: The SQL query that was executed
 
         Yields:
-            Dictionary containing:
-            {
-                "type": "chunk" | "metadata" | "error",
-                "content": str,
-                "elapsed_time": float (only for metadata)
-            }
+            String chunks of the explanation
         """
+        # Use TOON format for token-efficient results representation
         results_text = format_query_results(results_df) if results_df is not None and not results_df.empty else "No results found"
 
-        try:
-            start_time = time.time()
-            print(f"⏱️  [QWEN H100] Starting: Results Explanation (Streaming)...")
+        explain_prompt = PromptTemplate(
+            input_variables=["query", "results", "sql_query", "today_date"],
+            template=DATABASE_EXPLANATION_PROMPT
+        )
 
+        explain_chain = explain_prompt | self.explanation_llm | StrOutputParser()
+
+        try:
+            print(f"⏱️  [QWEN H100] Starting: Streaming Results Explanation...")
+
+            # Get today's date for context
             today_date = datetime.now().strftime("%A, %B %d, %Y")
 
-            formatted_prompt = self.explain_prompt.format(
-                query=query,
-                results=results_text,
-                sql_query=sql_query,
-                today_date=today_date
-            )
+            for chunk in explain_chain.stream({
+                "query": query,
+                "results": results_text,
+                "sql_query": sql_query,
+                "today_date": today_date
+            }):
+                yield chunk
 
-            # Stream from QWEN
-            for chunk in self.explanation_llm.stream(formatted_prompt):
-                # Handle different chunk formats
-                if hasattr(chunk, 'content') and chunk.content:
-                    yield {
-                        "type": "chunk",
-                        "content": chunk.content
-                    }
-                elif isinstance(chunk, str) and chunk:
-                    yield {
-                        "type": "chunk",
-                        "content": chunk
-                    }
-
-            elapsed = time.time() - start_time
-            print(f"✅ [QWEN H100] Completed: Results Explanation (Streaming) in {elapsed:.2f}s")
-
-            yield {
-                "type": "metadata",
-                "content": "",
-                "elapsed_time": elapsed
-            }
-
+            print(f"✅ [QWEN H100] Completed: Streaming Explanation")
         except Exception as e:
-            elapsed = time.time() - start_time if 'start_time' in locals() else 0
-            print(f"❌ Error explaining results (streaming): {e}")
-            yield {
-                "type": "error",
-                "content": f"Error generating explanation: {str(e)}",
-                "elapsed_time": elapsed
-            }
+            print(f"❌ Error streaming explanation: {e}")
+            yield "I found the results but had trouble explaining them."
