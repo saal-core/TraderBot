@@ -47,6 +47,7 @@ class InternetDataHandler:
             temperature=qwen_config.get("temperature", 0.3),
             streaming=True
         )
+        self.llm_type = "QWEN H100"  # For logging purposes
 
         # Explanation prompt
         self.explain_prompt = PromptTemplate(
@@ -98,12 +99,82 @@ class InternetDataHandler:
         today = datetime.now()
         current_year = today.year
 
+        # Parse "X months/years/weeks/days ago" patterns
+        ago_patterns = [
+            (r'(\d+)\s*months?\s+ago', 'months'),
+            (r'(\d+)\s*years?\s+ago', 'years'),
+            (r'(\d+)\s*weeks?\s+ago', 'weeks'),
+            (r'(\d+)\s*days?\s+ago', 'days'),
+        ]
+        
+        for pattern, unit in ago_patterns:
+            match = re.search(pattern, query_lower)
+            if match:
+                num = int(match.group(1))
+                if unit == 'months':
+                    # Calculate date X months ago
+                    target_month = today.month - num
+                    target_year = today.year
+                    while target_month <= 0:
+                        target_month += 12
+                        target_year -= 1
+                    # Handle day overflow (e.g., Jan 31 -> Feb doesn't have 31)
+                    target_day = min(today.day, 28)  # Safe day
+                    target_date = datetime(target_year, target_month, target_day)
+                elif unit == 'years':
+                    target_date = today.replace(year=today.year - num)
+                elif unit == 'weeks':
+                    target_date = today - timedelta(weeks=num)
+                elif unit == 'days':
+                    target_date = today - timedelta(days=num)
+                
+                from_date = target_date.strftime("%Y-%m-%d")
+                return from_date, today.strftime("%Y-%m-%d")
+
         months = {
             "january": 1, "february": 2, "march": 3, "april": 4,
             "may": 5, "june": 6, "july": 7, "august": 8,
             "september": 9, "october": 10, "november": 11, "december": 12
         }
 
+        # Parse "Month Year" patterns like "July 2024", "in July 2024", "January 2023"
+        for month_name, month_num in months.items():
+            # Pattern: "July 2024" or "in July 2024"
+            month_year_pattern = rf'{month_name}\s+(\d{{4}})'
+            match = re.search(month_year_pattern, query_lower)
+            if match:
+                year = int(match.group(1))
+                from_date = f"{year}-{month_num:02d}-01"
+                if month_num == 12:
+                    to_date = f"{year}-12-31"
+                else:
+                    next_month = datetime(year, month_num + 1, 1) - timedelta(days=1)
+                    to_date = next_month.strftime("%Y-%m-%d")
+                return from_date, to_date
+
+        # Parse standalone year like "in 2024", "2024"
+        year_pattern = r'(?:in\s+)?(\d{4})(?!\d)'
+        year_match = re.search(year_pattern, query_lower)
+        if year_match:
+            year = int(year_match.group(1))
+            # Only accept reasonable years (1990-current year)
+            if 1990 <= year <= current_year:
+                # Check if there's also a month mentioned
+                found_month = None
+                for month_name, month_num in months.items():
+                    if month_name in query_lower:
+                        found_month = month_num
+                        break
+                
+                if found_month:
+                    # Month + Year already handled above, but fallback here
+                    from_date = f"{year}-{found_month:02d}-01"
+                else:
+                    # Just year - use January 1st
+                    from_date = f"{year}-01-02"
+                return from_date, today.strftime("%Y-%m-%d")
+
+        # Parse standalone month names (assumes current or previous year)
         for month_name, month_num in months.items():
             if month_name in query_lower:
                 year = current_year if month_num <= today.month else current_year - 1
