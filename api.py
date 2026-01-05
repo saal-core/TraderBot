@@ -109,13 +109,24 @@ app.add_middleware(
 # Helper Functions
 # ============================================================================
 
+def serialize_value(value: Any) -> Any:
+    """Serialize a value to be JSON-safe."""
+    if value is None:
+        return None
+    if hasattr(value, 'isoformat'):
+        return value.isoformat()
+    if isinstance(value, (pd.Timestamp, pd.Timedelta)):
+        return str(value)
+    return value
+
+
 def convert_chat_history(messages: List[ChatMessage]) -> List[Dict[str, str]]:
     """Convert ChatMessage models to dict format expected by handlers"""
     return [
         {
             "role": msg.role,
             "content": msg.content,
-            "timestamp": msg.timestamp,
+            "timestamp": serialize_value(msg.timestamp),
             "sql_query": msg.sql_query,
             "query_type": msg.query_type
         }
@@ -136,6 +147,8 @@ def dataframe_to_list(df: pd.DataFrame) -> List[Dict[str, Any]]:
                 row[key] = value.isoformat()
             elif isinstance(value, (pd.Timestamp, pd.Timedelta)):
                 row[key] = str(value)
+            elif hasattr(value, 'item'):  # Handle numpy types
+                row[key] = value.item()
     return result
 
 
@@ -547,12 +560,22 @@ async def reset_stats():
 # Streaming SSE Endpoint
 # ============================================================================
 
+class CustomJSONEncoder(json.JSONEncoder):
+    """Custom JSON encoder that handles pandas Timestamp and datetime objects."""
+    def default(self, obj):
+        if hasattr(obj, 'isoformat'):
+            return obj.isoformat()
+        if isinstance(obj, (pd.Timestamp, pd.Timedelta)):
+            return str(obj)
+        return super().default(obj)
+
+
 def generate_sse_event(event_type: str, data: Any) -> str:
     """Generate a Server-Sent Event formatted string."""
     event_data = {"type": event_type, "data": data}
     if event_type == "content":
         event_data = {"type": event_type, "content": data}
-    return f"data:{json.dumps(event_data)}\n\n"
+    return f"data:{json.dumps(event_data, cls=CustomJSONEncoder)}\n\n"
 
 
 async def stream_query_response(query: str, chat_history: List[Dict[str, str]]):

@@ -85,10 +85,17 @@ def convert_messages_to_chat_history():
     """Convert session messages to API chat history format."""
     chat_history = []
     for msg in st.session_state.messages[-10:]:  # Last 10 messages
+        # Handle timestamp serialization
+        timestamp = msg.get("timestamp")
+        if hasattr(timestamp, 'isoformat'):
+            timestamp = timestamp.isoformat()
+        elif hasattr(timestamp, 'strftime'):  # Handle pandas Timestamp
+            timestamp = str(timestamp)
+
         chat_history.append({
             "role": msg["role"],
             "content": msg["content"],
-            "timestamp": msg.get("timestamp"),
+            "timestamp": timestamp,
             "sql_query": msg.get("sql_query"),
             "query_type": msg.get("query_type")
         })
@@ -113,11 +120,18 @@ def process_streaming_query(question: str):
             timeout=120
         )
         
+        # 1. Router Classification placeholder (shown FIRST, before response)
+        type_placeholder = st.empty()
+        
+        # Status and response placeholders
         status_placeholder = st.empty()
         response_placeholder = st.empty()
-        final_data = {"final_answer": "", "sql_query": None, "results": None, "query_type": None}
         
-
+        # Foldable elements placeholders
+        sql_placeholder = st.empty()
+        results_placeholder = st.empty()
+        
+        final_data = {"final_answer": "", "sql_query": None, "results": None, "query_type": None}
         full_response = ""
         
         for raw in response.iter_lines(decode_unicode=True):
@@ -130,22 +144,45 @@ def process_streaming_query(question: str):
                 
                 if event_type == "status":
                     data = evt.get("data", {})
-                    status_placeholder.text(f"{data.get('message', '')}")
+                    msg = data.get('message', '')
+                    status_placeholder.text(f"{msg}")
+                    
+                    # Show router classification as soon as we get the query type status
+                    if "Query type:" in msg:
+                        query_type = msg.replace("Query type:", "").strip()
+                        type_placeholder.info(f"🔍 **Router Classification:** {query_type}")
+                        final_data["query_type"] = query_type
                     
                 elif event_type == "content":
                     content = evt.get("content", "")
                     if content:
                         full_response += content
-                        # Get safe-to-display text (with complete markdown)
-                        # Display as plain text
+                        # Display as plain text with cursor
                         response_placeholder.text(full_response + "▌")
                     status_placeholder.empty()
                     
                 elif event_type == "assistant_message_complete":
-                    final_data.update(evt.get("data", {}))
+                    data = evt.get("data", {})
+                    final_data.update(data)
                     status_placeholder.empty()
                     # Final render - show complete response as plain text
                     response_placeholder.text(full_response)
+                    
+                    # Update router classification if not already shown
+                    if final_data.get("query_type") and type_placeholder:
+                        type_placeholder.info(f"🔍 **Router Classification:** {final_data['query_type']}")
+                    
+                    # 2. Show SQL Query in foldable expander
+                    if final_data.get("sql_query"):
+                        with sql_placeholder.container():
+                            with st.expander("📝 Generated SQL Query", expanded=False):
+                                st.code(final_data["sql_query"], language="sql")
+                    
+                    # 3. Show Results Table in foldable expander
+                    if final_data.get("results"):
+                        with results_placeholder.container():
+                            with st.expander("📋 Results Table", expanded=False):
+                                st.dataframe(final_data["results"])
                     
                 elif event_type == "error":
                     data = evt.get("data", {})
@@ -293,17 +330,22 @@ for message in st.session_state.messages:
         if message["role"] == "user":
             st.markdown(message["content"])
         else:
+            # 1. Show Router Classification FIRST (before response)
+            if message.get("query_type"):
+                st.info(f"🔍 **Router Classification:** {message['query_type']}")
+            
+            # Show response content
             st.text(message["content"])
-        
-        # Show SQL query if available
-        if message.get("sql_query"):
-            with st.expander("🔍 SQL Query"):
-                st.code(message["sql_query"], language="sql")
-        
-        # Show results table if available
-        if message.get("results"):
-            with st.expander("📋 Results Table"):
-                st.dataframe(message["results"])
+            
+            # 2. Show SQL query in foldable expander
+            if message.get("sql_query"):
+                with st.expander("📝 Generated SQL Query", expanded=False):
+                    st.code(message["sql_query"], language="sql")
+            
+            # 3. Show results table in foldable expander
+            if message.get("results"):
+                with st.expander("📋 Results Table", expanded=False):
+                    st.dataframe(message["results"])
 
 # Auto-initialize on first load
 if not st.session_state.initialized:
@@ -345,15 +387,22 @@ if question := st.chat_input("Ask a question about your portfolio or financial d
                 }
                 st.session_state.messages.append(assistant_message)
                 
-                # Show SQL query expander if available
-                if result.get("sql_query"):
-                    with st.expander("🔍 SQL Query"):
-                        st.code(result["sql_query"], language="sql")
-                
-                # Show results table if available
-                if result.get("results"):
-                    with st.expander("📋 Results Table"):
-                        st.dataframe(result["results"])
+                # Elements are already displayed during streaming
+                # Only display if non-streaming mode was used
+                if not streaming_enabled:
+                    # 1. Show Router Classification FIRST
+                    if result.get("query_type"):
+                        st.info(f"🔍 **Router Classification:** {result['query_type']}")
+                    
+                    # 2. Show SQL Query in foldable expander
+                    if result.get("sql_query"):
+                        with st.expander("📝 Generated SQL Query", expanded=False):
+                            st.code(result["sql_query"], language="sql")
+                    
+                    # 3. Show Results Table in foldable expander
+                    if result.get("results"):
+                        with st.expander("📋 Results Table", expanded=False):
+                            st.dataframe(result["results"])
 
 # Footer
 st.markdown("---")

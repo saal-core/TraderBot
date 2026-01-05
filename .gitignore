@@ -57,3 +57,4 @@ chroma.sqlite3
 ollama_models/
 examples/
 test_*.py
+**/*.pid
