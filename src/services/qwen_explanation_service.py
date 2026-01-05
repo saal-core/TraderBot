@@ -8,7 +8,11 @@ from typing import Dict, Any, Generator
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from src.config.prompts import DATABASE_EXPLANATION_PROMPT
+from src.config.prompts import (
+    DATABASE_EXPLANATION_PROMPT,
+    detect_language,
+    ARABIC_FINANCIAL_GLOSSARY
+)
 import os
 from dotenv import load_dotenv
 
@@ -58,7 +62,7 @@ class QwenExplanationService:
         )
 
         self.explain_prompt = PromptTemplate(
-            input_variables=["query", "results", "sql_query", "today_date"],
+            input_variables=["query", "results", "sql_query", "today_date", "language", "arabic_glossary"],
             template=DATABASE_EXPLANATION_PROMPT
         )
 
@@ -82,12 +86,18 @@ class QwenExplanationService:
 
             from datetime import datetime
             today_date = datetime.now().strftime("%A, %B %d, %Y")
+            
+            # Detect language and prepare glossary
+            language = detect_language(query)
+            arabic_glossary = ARABIC_FINANCIAL_GLOSSARY if language == "Arabic" else "N/A"
 
             formatted_prompt = self.explain_prompt.format(
                 query=query,
                 results=results_text,
                 sql_query=sql_query,
-                today_date=today_date
+                today_date=today_date,
+                language=language,
+                arabic_glossary=arabic_glossary
             )
 
             explanation = self.llm.invoke(formatted_prompt)
@@ -119,20 +129,30 @@ class QwenExplanationService:
         # Use TOON format for token-efficient results representation
         results_text = format_query_results(results_df) if results_df is not None and not results_df.empty else "No results found"
         
+        # Detect language and prepare glossary
+        language = detect_language(query)
+        arabic_glossary = ARABIC_FINANCIAL_GLOSSARY if language == "Arabic" else "N/A"
+        
+        from datetime import datetime
+        today_date = datetime.now().strftime("%A, %B %d, %Y")
+        
         try:
-            print(f"⏱️  [QWEN H100] Starting: Streaming Results Explanation...")
+            print(f"⏱️  [QWEN H100] Starting: Streaming Results Explanation ({language})...")
             
             for chunk in self.explain_chain.stream({
                 "query": query,
                 "results": results_text,
-                "sql_query": sql_query
+                "sql_query": sql_query,
+                "today_date": today_date,
+                "language": language,
+                "arabic_glossary": arabic_glossary
             }):
                 yield chunk
                 
             print(f"✅ [QWEN H100] Completed: Streaming Explanation")
         except Exception as e:
             print(f"❌ [QWEN H100] Error streaming explanation: {e}")
-            yield f"Error: {e}", elapsed
+            yield f"Error: {e}"
     
     def test_connection(self) -> tuple[bool, str, float]:
         """

@@ -38,12 +38,31 @@ ARABIC_FINANCIAL_GLOSSARY = """
 - Benchmark Return: عائد المعيار المرجعي
 """
 
+
+def detect_language(text: str) -> str:
+    """
+    Detect if text is primarily Arabic or English.
+    
+    Args:
+        text: Input text to analyze
+        
+    Returns:
+        "Arabic" if Arabic characters are detected, "English" otherwise
+    """
+    import re
+    # Arabic Unicode ranges: Arabic, Arabic Supplement, Arabic Extended-A
+    arabic_pattern = re.compile(r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]+')
+    arabic_matches = arabic_pattern.findall(text)
+    return "Arabic" if len(arabic_matches) > 0 else "English"
+
 # ============================================================================
 # RESULT EXPLANATION PROMPTS
 # ============================================================================
 
 # Database/Portfolio Results Explanation (used by database_handler and qwen_explanation_service)
 DATABASE_EXPLANATION_PROMPT = """You are a financial portfolio assistant interpreting data for users.
+
+**Response Language:** {language}
 
 **Today's Date:** {today_date}
 
@@ -69,12 +88,18 @@ Interpret and explain the data **from the user's perspective**. Your job is to a
 8. **Use date context** - When discussing "today", "this week", "YTD", etc., use the provided date for context
 9. **NO MARKDOWN for currency** - Do NOT use Latex formatting (like $...$) for currency. write "$100", not "$100" with latex. Ensure spaces between numbers and words.
 10. **Formatting** - No bolding or Italic for key figures and avoid complex markdown.
+11. **Language** - Respond ENTIRELY in {language}. If Arabic, use the financial terminology below.
+
+**Arabic Financial Glossary (use when responding in Arabic):**
+{arabic_glossary}
 
 **Response:**"""
 
 
 # Internet Data Explanation (used by internet_data_handler)
 INTERNET_DATA_EXPLANATION_PROMPT = """You are a financial analyst interpreting real-time market data for users.
+
+**Response Language:** {language}
 
 **Today's Date:** {today_date}
 
@@ -97,6 +122,10 @@ Interpret and explain the data **from the user's perspective**. Your job is to a
 8. **Use date context** - When discussing "today", "this week", performance periods, use the provided date for context
 9. **NO MARKDOWN for currency** - Do NOT use Latex formatting (like $...$) for currency. Write "$100" directly.
 10. **Plain Text Preferred** - Avoid complex markdown. Use simple bullet points. Ensure spaces between numbers and words.
+11. **Language** - Respond ENTIRELY in {language}. If Arabic, use the financial terminology below.
+
+**Arabic Financial Glossary (use when responding in Arabic):**
+{arabic_glossary}
 
 **Response:**"""
 

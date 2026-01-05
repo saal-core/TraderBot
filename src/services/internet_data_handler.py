@@ -15,7 +15,11 @@ from src.services.fmp_service import FMPService
 from src.services.perplexity_service import PerplexityService
 from src.services.chat_memory import ChatMemory
 from src.config.settings import get_qwen_config
-from src.config.prompts import INTERNET_DATA_EXPLANATION_PROMPT
+from src.config.prompts import (
+    INTERNET_DATA_EXPLANATION_PROMPT,
+    detect_language,
+    ARABIC_FINANCIAL_GLOSSARY
+)
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -49,9 +53,9 @@ class InternetDataHandler:
         )
         self.llm_type = "QWEN H100"  # For logging purposes
 
-        # Explanation prompt
+        # Explanation prompt with language and glossary placeholders
         self.explain_prompt = PromptTemplate(
-            input_variables=["query", "data", "today_date"],
+            input_variables=["query", "data", "today_date", "language", "arabic_glossary"],
             template=INTERNET_DATA_EXPLANATION_PROMPT
         )
 
@@ -712,11 +716,17 @@ If you had invested {currency_symbol}{amount:,.0f} in {symbol} on {actual_date},
             print(f"⏱️  [QWEN H100] Starting: Internet Data Explanation...")
 
             today_date = datetime.now().strftime("%A, %B %d, %Y")
+            
+            # Detect language and prepare glossary
+            language = detect_language(query)
+            arabic_glossary = ARABIC_FINANCIAL_GLOSSARY if language == "Arabic" else "N/A"
 
             formatted_prompt = self.explain_prompt.format(
                 query=query,
                 data=raw_data,
-                today_date=today_date
+                today_date=today_date,
+                language=language,
+                arabic_glossary=arabic_glossary
             )
 
             explanation = self.explanation_llm.invoke(formatted_prompt)
@@ -753,11 +763,17 @@ If you had invested {currency_symbol}{amount:,.0f} in {symbol} on {actual_date},
             print(f"⏱️  [QWEN H100] Starting: Internet Data Explanation (Streaming)...")
 
             today_date = datetime.now().strftime("%A, %B %d, %Y")
+            
+            # Detect language and prepare glossary
+            language = detect_language(query)
+            arabic_glossary = ARABIC_FINANCIAL_GLOSSARY if language == "Arabic" else "N/A"
 
             formatted_prompt = self.explain_prompt.format(
                 query=query,
                 data=raw_data,
-                today_date=today_date
+                today_date=today_date,
+                language=language,
+                arabic_glossary=arabic_glossary
             )
 
             # Stream from QWEN
@@ -798,15 +814,19 @@ If you had invested {currency_symbol}{amount:,.0f} in {symbol} on {actual_date},
         Yields:
             String chunks of the explanation
         """
+        # Detect language and prepare glossary
+        language = detect_language(query)
+        arabic_glossary = ARABIC_FINANCIAL_GLOSSARY if language == "Arabic" else "N/A"
+        
         explain_prompt = PromptTemplate(
-            input_variables=["query", "data", "today_date"],
+            input_variables=["query", "data", "today_date", "language", "arabic_glossary"],
             template=INTERNET_DATA_EXPLANATION_PROMPT
         )
 
         explain_chain = explain_prompt | self.explanation_llm | StrOutputParser()
 
         try:
-            print(f"⏱️  [{self.llm_type}] Starting: Streaming Internet Data Explanation...")
+            print(f"⏱️  [{self.llm_type}] Starting: Streaming Internet Data Explanation ({language})...")
 
             # Get today's date for context
             today_date = datetime.now().strftime("%A, %B %d, %Y")
@@ -814,7 +834,9 @@ If you had invested {currency_symbol}{amount:,.0f} in {symbol} on {actual_date},
             for chunk in explain_chain.stream({
                 "query": query,
                 "data": raw_data,
-                "today_date": today_date
+                "today_date": today_date,
+                "language": language,
+                "arabic_glossary": arabic_glossary
             }):
                 yield chunk
 

@@ -10,7 +10,9 @@ from src.config.settings import get_ollama_config, get_openai_config, get_qwen_c
 from src.config.prompts import (
     DATABASE_EXPLANATION_PROMPT,
     STOCK_EXTRACTION_PROMPT,
-    SYMBOL_MATCHING_PROMPT
+    SYMBOL_MATCHING_PROMPT,
+    detect_language,
+    ARABIC_FINANCIAL_GLOSSARY
 )
 from src.services.chat_memory import ChatMemory
 from src.services.portfolio_alias_resolver import PortfolioAliasResolver
@@ -90,9 +92,9 @@ class DatabaseQueryHandler:
 
         self.sql_chain = self.sql_prompt | self.llm | StrOutputParser()
 
-        # Explanation prompt
+        # Explanation prompt with language and glossary placeholders
         self.explain_prompt = PromptTemplate(
-            input_variables=["query", "results", "sql_query", "today_date"],
+            input_variables=["query", "results", "sql_query", "today_date", "language", "arabic_glossary"],
             template=DATABASE_EXPLANATION_PROMPT
         )
 
@@ -402,12 +404,18 @@ Use these placeholders EXACTLY as shown in your SQL WHERE clauses.
             print(f"⏱️  [QWEN H100] Starting: Results Explanation Generation...")
 
             today_date = datetime.now().strftime("%A, %B %d, %Y")
+            
+            # Detect language and prepare glossary
+            language = detect_language(query)
+            arabic_glossary = ARABIC_FINANCIAL_GLOSSARY if language == "Arabic" else "N/A"
 
             formatted_prompt = self.explain_prompt.format(
                 query=query,
                 results=results_text,
                 sql_query=sql_query,
-                today_date=today_date
+                today_date=today_date,
+                language=language,
+                arabic_glossary=arabic_glossary
             )
 
             explanation = self.explanation_llm.invoke(formatted_prompt)
@@ -440,15 +448,19 @@ Use these placeholders EXACTLY as shown in your SQL WHERE clauses.
         # Use TOON format for token-efficient results representation
         results_text = format_query_results(results_df) if results_df is not None and not results_df.empty else "No results found"
 
+        # Detect language and prepare glossary
+        language = detect_language(query)
+        arabic_glossary = ARABIC_FINANCIAL_GLOSSARY if language == "Arabic" else "N/A"
+
         explain_prompt = PromptTemplate(
-            input_variables=["query", "results", "sql_query", "today_date"],
+            input_variables=["query", "results", "sql_query", "today_date", "language", "arabic_glossary"],
             template=DATABASE_EXPLANATION_PROMPT
         )
 
         explain_chain = explain_prompt | self.explanation_llm | StrOutputParser()
 
         try:
-            print(f"⏱️  [QWEN H100] Starting: Streaming Results Explanation...")
+            print(f"⏱️  [QWEN H100] Starting: Streaming Results Explanation ({language})...")
 
             # Get today's date for context
             today_date = datetime.now().strftime("%A, %B %d, %Y")
@@ -457,7 +469,9 @@ Use these placeholders EXACTLY as shown in your SQL WHERE clauses.
                 "query": query,
                 "results": results_text,
                 "sql_query": sql_query,
-                "today_date": today_date
+                "today_date": today_date,
+                "language": language,
+                "arabic_glossary": arabic_glossary
             }):
                 yield chunk
 
