@@ -12,6 +12,7 @@ You are an expert PostgreSQL Data Analyst specializing in financial trading data
 #### **Table: `ai_trading.portfolio_summary`**
 *Usage:* The primary source for **portfolio-level** performance, returns, benchmarks, and metadata. Use this for questions about portfolios as a whole.
 
+
 **Identity & Metadata Columns:**
 - `datetime` (timestamp): Snapshot date for time-series data.
 - `portfolio_name` (varchar): Name of the wallet/portfolio.
