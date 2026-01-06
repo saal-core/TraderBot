@@ -51,7 +51,6 @@ a5b846fc-2076-4b0a-98c6-71e7eb087f2a/
 
 chroma.sqlite3
 *.sql
-*.md
 *.txt
 *.sh
 ollama_models/

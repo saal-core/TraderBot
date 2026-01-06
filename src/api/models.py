@@ -31,6 +31,10 @@ class QueryRequest(BaseModel):
 class ClassifyRequest(BaseModel):
     """Request for classifying a query"""
     query: str = Field(..., description="Query to classify")
+    chat_history: List[ChatMessage] = Field(
+        default_factory=list,
+        description="Previous chat messages for context"
+    )
 
 
 class ExportRequest(BaseModel):

@@ -15,7 +15,6 @@ from src.config.prompts import (
     ARABIC_FINANCIAL_GLOSSARY
 )
 from src.services.chat_memory import ChatMemory
-from src.services.portfolio_alias_resolver import PortfolioAliasResolver
 import os
 import time
 from datetime import datetime
@@ -78,15 +77,12 @@ class DatabaseQueryHandler:
             streaming=True  # Enable streaming
         )
 
-        # Initialize alias resolver for privacy-preserving placeholder generation
-        self.alias_resolver = PortfolioAliasResolver(sql_executor=sql_executor)
-
         # Load custom prompt template
         self.custom_prompt_template = self._load_custom_prompt()
 
         # Create prompt template with dynamic data including conversation history
         self.sql_prompt = PromptTemplate(
-            input_variables=["schema", "entity_placeholders", "query", "matched_symbols", "conversation_history"],
+            input_variables=["schema", "query", "matched_symbols", "conversation_history"],
             template=self.custom_prompt_template
         )
 
@@ -100,7 +96,7 @@ class DatabaseQueryHandler:
 
     def _load_custom_prompt(self) -> str:
         """Load custom prompt from test2sql_prompt.md"""
-        prompt_file = "/home/dev/Hussein/trader_bot_enhance/test2sql_prompt.md"
+        prompt_file = "/home/dev/Hussein/TraderBot/test2sql_prompt.md"
 
         if os.path.exists(prompt_file):
             with open(prompt_file, 'r', encoding='utf-8') as f:
@@ -128,29 +124,13 @@ use the conversation history to understand the full intent. Otherwise, treat as 
 
 ---
 
-### **6. Entity Placeholders (Privacy-Preserving)**
-
-**IMPORTANT**: The user's query has been preprocessed. Portfolio names and account IDs are replaced with placeholders.
-Use these placeholders EXACTLY as shown in your SQL WHERE clauses.
-
-**Resolved Entities:**
-{{entity_placeholders}}
-
-**Matched Stock Symbols (if any):**
+### **6. Matched Stock Symbols (if any):**
 {{matched_symbols}}
-
-**PLACEHOLDER USAGE RULES:**
-- ONLY use placeholders that are explicitly listed in "Resolved Entities" above
-- If "Resolved Entities" says "No specific portfolio or account mentioned", do NOT use any :PORTFOLIO_N or :ACCOUNT_N placeholders
-- When placeholders are provided: Use them directly in WHERE clauses: `WHERE portfolio_name = :PORTFOLIO_1`
-- Do NOT wrap placeholders in quotes: Use `:PORTFOLIO_1` not `':PORTFOLIO_1'`
-- Do NOT invent or create placeholders - only use what is provided above
 
 ---
 
 ### **7. Output Instructions**
 
-- Use the placeholders provided above when filtering by portfolio or account
 - Generate ONLY a SELECT query
 - Do not use INSERT, UPDATE, DELETE, or any data modification statements
 - Return only the SQL query without any explanation or markdown
@@ -170,12 +150,16 @@ Use these placeholders EXACTLY as shown in your SQL WHERE clauses.
     def _format_conversation_history(self, chat_history: List[Dict[str, str]]) -> str:
         """Format conversation history for SQL generation context"""
         if not chat_history:
+            print("📝 Conversation history: Empty (first question)")
             return "No previous conversation (this is the first question)."
 
         recent_messages = self.chat_memory.get_context_messages(chat_history)
 
         if not recent_messages:
+            print("📝 Conversation history: Empty after filtering")
             return "No previous conversation (this is the first question)."
+
+        print(f"📝 Conversation history: {len(recent_messages)} messages found")
 
         formatted_lines = []
         for msg in recent_messages:
@@ -308,29 +292,15 @@ Use these placeholders EXACTLY as shown in your SQL WHERE clauses.
             chat_history: Previous conversation history for follow-up questions
 
         Returns:
-            Generated SQL query string with actual values substituted
+            Generated SQL query string
         """
         if chat_history is None:
             chat_history = []
 
-        # Phase 1: Resolve entities using local LLM (privacy-preserving)
-        print("🔒 Phase 1: Resolving portfolio/account references locally...")
-        entity_resolution = self.alias_resolver.resolve_entities(query)
-
-        rewritten_query = entity_resolution.rewritten_query
-        placeholder_map = entity_resolution.placeholder_map
-        entity_placeholders = entity_resolution.placeholder_info
-
-        if placeholder_map:
-            print(f"  → Placeholder map: {placeholder_map}")
-            print(f"  → Rewritten query: {rewritten_query}")
-        else:
-            print("  → No specific portfolio/account mentioned")
-
         conversation_text = self._format_conversation_history(chat_history)
 
         # Check for stock mentions
-        print("  → Checking for stock mentions...")
+        print("📊 Checking for stock mentions...")
         mentioned_terms = self._extract_stock_mentions(query)
 
         matched_symbols = "N/A"
@@ -340,16 +310,15 @@ Use these placeholders EXACTLY as shown in your SQL WHERE clauses.
             matched_symbols = self._fuzzy_match_symbols(mentioned_terms, symbols_dict)
             print(f"  → {matched_symbols}")
 
-        # Phase 2: Generate SQL with placeholders
+        # Generate SQL
         start_time = time.time()
-        print(f"⏱️  Phase 2: SQL Query Generation...")
+        print(f"⏱️  SQL Query Generation...")
 
         sql = self.sql_chain.invoke({
             "schema": schema,
-            "entity_placeholders": entity_placeholders,
             "matched_symbols": matched_symbols,
             "conversation_history": conversation_text,
-            "query": rewritten_query
+            "query": query
         })
 
         elapsed = time.time() - start_time
@@ -362,26 +331,7 @@ Use these placeholders EXACTLY as shown in your SQL WHERE clauses.
             sql = "\n".join([line for line in lines if not line.startswith("```") and "sql" not in line.lower()])
         sql = sql.strip()
 
-        print(f"  → Generated SQL (with placeholders): {sql}")
-
-        # Phase 3: Substitute placeholders with actual values
-        if placeholder_map:
-            print(f"🔓 Phase 3: Substituting placeholders...")
-            sql = self.alias_resolver.substitute_placeholders(sql, placeholder_map)
-            print(f"  → Final SQL: {sql}")
-
-        # Validate no unsubstituted placeholders remain
-        import re
-        remaining_placeholders = re.findall(r':(PORTFOLIO_\d+|ACCOUNT_\d+)', sql)
-        if remaining_placeholders:
-            print(f"⚠️  Warning: Unsubstituted placeholders: {remaining_placeholders}")
-            for placeholder in remaining_placeholders:
-                full_placeholder = f":{placeholder}"
-                if full_placeholder in placeholder_map:
-                    actual_value = placeholder_map[full_placeholder]
-                    sql = sql.replace(full_placeholder, f"'{actual_value}'")
-                else:
-                    return f"ERROR: Could not resolve portfolio/account reference."
+        print(f"  → Generated SQL: {sql}")
 
         return sql
 

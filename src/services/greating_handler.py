@@ -8,7 +8,6 @@ from src.services.chat_memory import ChatMemory
 import os
 import time
 from rapidfuzz import fuzz, process
-from .query_router import QueryRouter
 from dotenv import load_dotenv
 load_dotenv()
 

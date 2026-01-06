@@ -14,12 +14,14 @@ from langchain_core.output_parsers import StrOutputParser
 from src.services.fmp_service import FMPService
 from src.services.perplexity_service import PerplexityService
 from src.services.chat_memory import ChatMemory
-from src.config.settings import get_qwen_config
+from src.config.settings import get_qwen_config, get_ollama_config
 from src.config.prompts import (
     INTERNET_DATA_EXPLANATION_PROMPT,
+    STANDALONE_QUESTION_USER_PROMPT,
     detect_language,
     ARABIC_FINANCIAL_GLOSSARY
 )
+from langchain_community.llms import Ollama
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -72,6 +74,94 @@ class InternetDataHandler:
             "mastercard": "MA", "jpmorgan": "JPM", "goldman": "GS",
             "berkshire": "BRK-B",
         }
+        
+        # Initialize Ollama for query rewriting (lightweight, fast)
+        ollama_config = get_ollama_config()
+        self.rewrite_llm = Ollama(
+            model=ollama_config["model_name"],
+            base_url=ollama_config["base_url"],
+            temperature=0.1,
+            num_predict=100,  # Short response expected
+        )
+
+    def _rewrite_query(self, query: str, chat_history: List[Dict[str, str]]) -> str:
+        """
+        Rewrite a follow-up query into a standalone question using conversation history.
+        
+        Args:
+            query: The potentially incomplete follow-up query
+            chat_history: Previous conversation history
+            
+        Returns:
+            A complete, standalone question
+        """
+        if not chat_history:
+            return query
+        
+        # Format conversation history
+        recent_messages = self.chat_memory.get_context_messages(chat_history)
+        if not recent_messages:
+            return query
+        
+        # Check if query seems like a follow-up (short or lacking context)
+        query_lower = query.lower().strip()
+        followup_indicators = [
+            len(query.split()) <= 5,  # Short queries
+            query_lower.startswith("in "),
+            query_lower.startswith("for "),
+            query_lower.startswith("from "),
+            query_lower.startswith("what about"),
+            query_lower.startswith("show me"),
+            query_lower.startswith("give me"),
+            "more" in query_lower,
+            "also" in query_lower,
+            "instead" in query_lower,
+            "us market" in query_lower,
+            "nasdaq" in query_lower and len(query.split()) <= 4,
+            "nyse" in query_lower and len(query.split()) <= 4,
+        ]
+        
+        if not any(followup_indicators):
+            return query
+        
+        # Format history for prompt
+        history_lines = []
+        for msg in recent_messages[-4:]:  # Last 2 Q&A pairs
+            role = msg.get("role", "").capitalize()
+            content = msg.get("content", "")
+            # Truncate long content
+            if len(content) > 300:
+                content = content[:300] + "..."
+            history_lines.append(f"{role}: {content}")
+        
+        history_text = "\n".join(history_lines)
+        
+        try:
+            start_time = time.time()
+            print(f"🔄 Rewriting follow-up query with context...")
+            
+            prompt = STANDALONE_QUESTION_USER_PROMPT.format(
+                history=history_text,
+                question=query
+            )
+            
+            rewritten = self.rewrite_llm.invoke(prompt)
+            rewritten = rewritten.strip()
+            
+            # Clean up any prefixes the LLM might add
+            for prefix in ["Standalone Question:", "Question:", "Rewritten:"]:
+                if rewritten.startswith(prefix):
+                    rewritten = rewritten[len(prefix):].strip()
+            
+            elapsed = time.time() - start_time
+            print(f"   → Original: '{query}'")
+            print(f"   → Rewritten: '{rewritten}' ({elapsed:.2f}s)")
+            
+            return rewritten if rewritten else query
+            
+        except Exception as e:
+            print(f"   → Rewrite failed: {e}, using original query")
+            return query
 
     def _resolve_symbol(self, query: str) -> Optional[str]:
         """Extract and resolve stock symbol from query."""
@@ -644,31 +734,34 @@ If you had invested {currency_symbol}{amount:,.0f} in {symbol} on {actual_date},
             start_time = time.time()
             print(f"⏱️  Starting: Internet Data Fetch...")
 
-            query_type = self._classify_query(user_query)
+            # Rewrite follow-up queries using conversation context
+            processed_query = self._rewrite_query(user_query, chat_history)
+
+            query_type = self._classify_query(processed_query)
             print(f"  → Query classified as: {query_type}")
 
             if query_type == "HYPOTHETICAL_INVESTMENT":
-                response = self._handle_hypothetical_investment(user_query)
+                response = self._handle_hypothetical_investment(processed_query)
             elif query_type == "MARKET_MOVERS":
-                response = self._handle_market_movers(user_query)
+                response = self._handle_market_movers(processed_query)
             elif query_type == "NEWS":
-                response = self._handle_news(user_query, chat_history)
+                response = self._handle_news(processed_query, chat_history)
             elif query_type == "COMMODITY_PRICE":
-                response = self._handle_commodity(user_query)
+                response = self._handle_commodity(processed_query)
             elif query_type == "CRYPTO_PRICE":
-                response = self._handle_crypto(user_query)
+                response = self._handle_crypto(processed_query)
             elif query_type == "INDEX_PERFORMANCE":
-                response = self._handle_index(user_query)
+                response = self._handle_index(processed_query)
             elif query_type == "FOREX":
-                response = self._handle_forex(user_query)
+                response = self._handle_forex(processed_query)
             elif query_type == "CURRENT_PRICE":
-                response = self._handle_current_price(user_query)
+                response = self._handle_current_price(processed_query)
             else:
-                symbol = self._resolve_symbol(user_query)
+                symbol = self._resolve_symbol(processed_query)
                 if symbol:
-                    response = self._handle_current_price(user_query)
+                    response = self._handle_current_price(processed_query)
                 else:
-                    response = self._handle_news(user_query)
+                    response = self._handle_news(processed_query)
 
             elapsed = time.time() - start_time
             print(f"✅ Completed: Internet Data Fetch in {elapsed:.2f}s")

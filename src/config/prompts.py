@@ -87,7 +87,7 @@ Interpret and explain the data **from the user's perspective**. Your job is to a
 7. **No code or SQL** - Never include code, SQL, or technical syntax in your response
 8. **Use date context** - When discussing "today", "this week", "YTD", etc., use the provided date for context
 9. **NO MARKDOWN for currency** - Do NOT use Latex formatting (like $...$) for currency. write "$100", not "$100" with latex. Ensure spaces between numbers and words.
-10. **Formatting** - No bolding or Italic for key figures and avoid complex markdown.
+10. **NO BOLD OR ITALIC** - Never use **bold** or *italic* markdown. Use plain text only. No asterisks around words.
 11. **Language** - Respond ENTIRELY in {language}. If Arabic, use the financial terminology below.
 
 **Arabic Financial Glossary (use when responding in Arabic):**
@@ -121,7 +121,7 @@ Interpret and explain the data **from the user's perspective**. Your job is to a
 7. **If data is missing or incomplete** - Acknowledge it naturally without being overly technical
 8. **Use date context** - When discussing "today", "this week", performance periods, use the provided date for context
 9. **NO MARKDOWN for currency** - Do NOT use Latex formatting (like $...$) for currency. Write "$100" directly.
-10. **Plain Text Preferred** - Avoid complex markdown. Use simple bullet points. Ensure spaces between numbers and words.
+10. **NO BOLD OR ITALIC** - Never use **bold** or *italic* markdown. Use plain text only. No asterisks around words.
 11. **Language** - Respond ENTIRELY in {language}. If Arabic, use the financial terminology below.
 
 **Arabic Financial Glossary (use when responding in Arabic):**

@@ -25,7 +25,7 @@ from src.api.models import (
 # Import services
 from src.config.settings import get_app_config, get_ollama_config, get_postgres_config
 from src.services.sql_utilities import PostgreSQLExecutor
-from src.services.gpt_oss_query_router_v2 import OptimizedQueryRouter
+from src.services.llm_query_router import LLMQueryRouter
 from src.services.database_handler import DatabaseQueryHandler
 from src.services.greating_handler import GreetingHandler
 from src.services.internet_data_handler import InternetDataHandler
@@ -49,7 +49,7 @@ class AppState:
     def __init__(self):
         self.initialized = False
         self.sql_executor: Optional[PostgreSQLExecutor] = None
-        self.router: Optional[OptimizedQueryRouter] = None
+        self.router: Optional[LLMQueryRouter] = None
         self.db_handler: Optional[DatabaseQueryHandler] = None
         self.greeting_handler: Optional[GreetingHandler] = None
         self.internet_data_handler: Optional[InternetDataHandler] = None
@@ -182,8 +182,8 @@ async def initialize():
         if not success:
             return InitializeResponse(success=False, message=message)
         
-        app_state.router = OptimizedQueryRouter(sql_executor=app_state.sql_executor)
-        app_state.db_handler = DatabaseQueryHandler(sql_executor=app_state.sql_executor)
+        app_state.router = LLMQueryRouter()
+        app_state.db_handler = DatabaseQueryHandler(sql_executor=app_state.sql_executor, use_openai=False)
         app_state.greeting_handler = GreetingHandler()
         app_state.internet_data_handler = InternetDataHandler()
         app_state.chat_memory = ChatMemory(max_pairs=5)
@@ -220,7 +220,8 @@ async def classify_query(request: ClassifyRequest):
         )
     
     try:
-        query_type = app_state.router.classify_query(request.query)
+        chat_history = convert_chat_history(request.chat_history) if request.chat_history else []
+        query_type = app_state.router.classify_query(request.query, chat_history)
         return ClassifyResponse(query_type=query_type)
     except Exception as e:
         raise HTTPException(
@@ -600,7 +601,7 @@ async def stream_query_response(query: str, chat_history: List[Dict[str, str]]):
         yield generate_sse_event("status", {"message": "Classifying query..."})
         await asyncio.sleep(0.01)  # Allow event to flush
         
-        query_type = app_state.router.classify_query(query)
+        query_type = app_state.router.classify_query(query, chat_history)
         yield generate_sse_event("status", {"message": f"Query type: {query_type}"})
         await asyncio.sleep(0.01)
         

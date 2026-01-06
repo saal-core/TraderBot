@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-Simple SQL Query Executor
-Executes SQL queries using the credentials from .env file
-"""
-
 import os
 import psycopg2
 from tabulate import tabulate
@@ -17,7 +11,7 @@ load_dotenv()
 # ============================================
 sql_query = """
 SELECT *
-FROM ai_trading.portfolio_holdings_realized_pnl phr
+FROM ai_trading.portfolio_summary ps
 LIMIT 10;
 """
 # ============================================
