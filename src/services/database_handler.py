@@ -100,7 +100,7 @@ class DatabaseQueryHandler:
 
     def _load_custom_prompt(self) -> str:
         """Load custom prompt from test2sql_prompt.md"""
-        prompt_file = "/home/dev/Hussein/trader_bot_enhance/test2sql_prompt.md"
+        prompt_file = "test2sql_prompt.md"
 
         if os.path.exists(prompt_file):
             with open(prompt_file, 'r', encoding='utf-8') as f:

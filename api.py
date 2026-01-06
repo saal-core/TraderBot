@@ -183,7 +183,7 @@ async def initialize():
             return InitializeResponse(success=False, message=message)
         
         app_state.router = OptimizedQueryRouter(sql_executor=app_state.sql_executor)
-        app_state.db_handler = DatabaseQueryHandler(sql_executor=app_state.sql_executor)
+        app_state.db_handler = DatabaseQueryHandler(sql_executor=app_state.sql_executor, use_openai=False)
         app_state.greeting_handler = GreetingHandler()
         app_state.internet_data_handler = InternetDataHandler()
         app_state.chat_memory = ChatMemory(max_pairs=5)
