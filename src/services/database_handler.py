@@ -360,6 +360,9 @@ class DatabaseQueryHandler:
 
             # Get today's date for context
             today_date = datetime.now().strftime("%A, %B %d, %Y")
+            
+            start_time = time.time()
+            first_token_received = False
 
             for chunk in explain_chain.stream({
                 "query": query,
@@ -369,6 +372,10 @@ class DatabaseQueryHandler:
                 "language": language,
                 "arabic_glossary": arabic_glossary
             }):
+                if not first_token_received:
+                    elapsed = time.time() - start_time
+                    print(f"⚡ First token received in {elapsed:.4f}s")
+                    first_token_received = True
                 yield chunk
 
             print(f"✅ [QWEN H100] Completed: Streaming Explanation")

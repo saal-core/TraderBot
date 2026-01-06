@@ -870,7 +870,15 @@ If you had invested {currency_symbol}{amount:,.0f} in {symbol} on {actual_date},
             )
 
             # Stream from QWEN
+            stream_start_time = time.time()
+            first_token_received = False
+            
             for chunk in self.explanation_llm.stream(formatted_prompt):
+                if not first_token_received:
+                    elapsed = time.time() - stream_start_time
+                    print(f"⚡ First token received in {elapsed:.4f}s")
+                    first_token_received = True
+                    
                 if hasattr(chunk, 'content') and chunk.content:
                     yield {
                         "type": "chunk",
@@ -923,6 +931,9 @@ If you had invested {currency_symbol}{amount:,.0f} in {symbol} on {actual_date},
 
             # Get today's date for context
             today_date = datetime.now().strftime("%A, %B %d, %Y")
+            
+            start_time = time.time()
+            first_token_received = False
 
             for chunk in explain_chain.stream({
                 "query": query,
@@ -931,6 +942,10 @@ If you had invested {currency_symbol}{amount:,.0f} in {symbol} on {actual_date},
                 "language": language,
                 "arabic_glossary": arabic_glossary
             }):
+                if not first_token_received:
+                    elapsed = time.time() - start_time
+                    print(f"⚡ First token received in {elapsed:.4f}s")
+                    first_token_received = True
                 yield chunk
 
             print(f"✅ [{self.llm_type}] Completed: Streaming Internet Data Explanation")
