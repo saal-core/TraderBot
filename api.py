@@ -183,7 +183,7 @@ async def initialize():
             return InitializeResponse(success=False, message=message)
         
         app_state.router = LLMQueryRouter()
-        app_state.db_handler = DatabaseQueryHandler(sql_executor=app_state.sql_executor, use_openai=False)
+        app_state.db_handler = DatabaseQueryHandler(sql_executor=app_state.sql_executor)
         app_state.greeting_handler = GreetingHandler()
         app_state.internet_data_handler = InternetDataHandler()
         app_state.chat_memory = ChatMemory(max_pairs=5)
@@ -251,15 +251,9 @@ async def process_database_query_streaming(request: QueryRequest):
             yield f"data: {json.dumps({'type': 'status', 'content': '🔍 Generating SQL query...'})}\n\n"
             await asyncio.sleep(0)  # Allow event loop to send
 
-            # Get database schema
-            schema = app_state.sql_executor.get_schema_info()
-            if "Error" in schema:
-                yield f"data: {json.dumps({'type': 'error', 'content': f'Failed to retrieve database schema: {schema}'})}\n\n"
-                return
-
             # Generate SQL query
             sql_query = app_state.db_handler.generate_sql(
-                request.query, schema, chat_history
+                request.query, chat_history
             )
 
             if sql_query.startswith("ERROR"):
@@ -628,19 +622,10 @@ async def stream_query_response(query: str, chat_history: List[Dict[str, str]]):
             app_state.query_stats["greeting"] += 1
             
         elif query_type == "database":
-            yield generate_sse_event("status", {"message": "Fetching database schema..."})
-            await asyncio.sleep(0.01)
-            
-            schema = app_state.sql_executor.get_schema_info()
-            if "Error" in schema:
-                yield generate_sse_event("error", {"error": f"Failed to retrieve schema: {schema}"})
-                yield generate_sse_event("stream_end", {})
-                return
-            
             yield generate_sse_event("status", {"message": "Generating SQL query..."})
             await asyncio.sleep(0.01)
             
-            sql_query = app_state.db_handler.generate_sql(query, schema, chat_history)
+            sql_query = app_state.db_handler.generate_sql(query, chat_history)
             
             if sql_query.startswith("ERROR"):
                 yield generate_sse_event("error", {"error": sql_query})

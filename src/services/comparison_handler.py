@@ -186,15 +186,8 @@ class ComparisonHandler:
         print(f"  → Query: {query_hint}")
 
         try:
-            # Get database schema
-            schema = self.sql_executor.get_schema_info() if self.sql_executor else ""
-            
-            if "Error" in schema:
-                print(f"❌ Schema retrieval failed: {schema}")
-                return False, None, None, None
-
             # Generate SQL query
-            sql_query = self.db_handler.generate_sql(query_hint, schema, chat_history)
+            sql_query = self.db_handler.generate_sql(query_hint, chat_history)
             
             if sql_query.startswith("ERROR"):
                 print(f"❌ SQL generation failed: {sql_query}")

@@ -29,7 +29,7 @@ from src.utils.toon_formatter import format_query_results, format_symbol_list
 class DatabaseQueryHandler:
     """Handles database-related queries by generating SQL using custom prompt"""
 
-    def __init__(self, model_name: str = None, use_openai: bool = True, sql_executor=None, memory_max_pairs: int = 5):
+    def __init__(self, model_name: str = None, sql_executor=None, memory_max_pairs: int = 5):
         """
         Initialize the database query handler
 
@@ -43,28 +43,16 @@ class DatabaseQueryHandler:
         self._symbols_cache = None
         self.chat_memory = ChatMemory(max_pairs=memory_max_pairs)
 
-        # Initialize SQL generation model (OpenAI or Ollama)
-        if use_openai:
-            openai_config = get_openai_config()
-            self.model_name = model_name or openai_config["model_name"]
-            self.temperature = openai_config["temperature_sql"]
+        ollama_config = get_ollama_config()
+        self.model_name = model_name or ollama_config["model_name"]
+        self.base_url = ollama_config["base_url"]
+        self.temperature = ollama_config["temperature_sql"]
 
-            self.llm = ChatOpenAI(
-                model=self.model_name,
-                temperature=self.temperature,
-                api_key=openai_config["api_key"]
-            )
-        else:
-            ollama_config = get_ollama_config()
-            self.model_name = model_name or ollama_config["model_name"]
-            self.base_url = ollama_config["base_url"]
-            self.temperature = ollama_config["temperature_sql"]
-
-            self.llm = Ollama(
-                model=self.model_name,
-                base_url=self.base_url,
-                temperature=self.temperature
-            )
+        self.llm = Ollama(
+            model=self.model_name,
+            base_url=self.base_url,
+            temperature=self.temperature
+        )
 
         # Use QWEN (H100) for explanations - faster than local Ollama
         qwen_config = get_qwen_config()
@@ -82,7 +70,7 @@ class DatabaseQueryHandler:
 
         # Create prompt template with dynamic data including conversation history
         self.sql_prompt = PromptTemplate(
-            input_variables=["schema", "query", "matched_symbols", "conversation_history"],
+            input_variables=["query", "matched_symbols", "conversation_history"],
             template=self.custom_prompt_template
         )
 
@@ -103,49 +91,9 @@ class DatabaseQueryHandler:
                 prompt_content = f.read()
                 print("=" * 20 + "\nLoaded custom SQL prompt template.\n" + "=" * 20)
         else:
-            prompt_content = """You are a PostgreSQL SQL expert. Generate a SQL query based on the user's question and database schema."""
+            raise FileNotFoundError(f"Prompt file not found: {prompt_file}")
 
-        full_template = f"""{prompt_content}
-
----
-
-### **4. Conversation History (for follow-up questions)**
-
-{{conversation_history}}
-
-**Note:** If the current question refers to previous context (e.g., "show more", "what about top 10", "give me details"),
-use the conversation history to understand the full intent. Otherwise, treat as a standalone question.
-
----
-
-### **5. Database Schema**
-
-{{schema}}
-
----
-
-### **6. Matched Stock Symbols (if any):**
-{{matched_symbols}}
-
----
-
-### **7. Output Instructions**
-
-- Generate ONLY a SELECT query
-- Do not use INSERT, UPDATE, DELETE, or any data modification statements
-- Return only the SQL query without any explanation or markdown
-- Use proper PostgreSQL syntax
-- Always use schema prefix: `ai_trading.table_name`
-
----
-
-### **User Question:**
-
-{{query}}
-
-### **SQL Query:**"""
-
-        return full_template
+        return prompt_content
 
     def _format_conversation_history(self, chat_history: List[Dict[str, str]]) -> str:
         """Format conversation history for SQL generation context"""
@@ -282,13 +230,12 @@ use the conversation history to understand the full intent. Otherwise, treat as 
         else:
             return f"No close matches found for: {', '.join(mentioned_terms)}"
 
-    def generate_sql(self, query: str, schema: str, chat_history: List[Dict[str, str]] = None) -> str:
+    def generate_sql(self, query: str, chat_history: List[Dict[str, str]] = None) -> str:
         """
         Generate SQL query from natural language question with fuzzy stock matching.
 
         Args:
             query: User's natural language question
-            schema: Database schema information
             chat_history: Previous conversation history for follow-up questions
 
         Returns:
@@ -315,7 +262,6 @@ use the conversation history to understand the full intent. Otherwise, treat as 
         print(f"⏱️  SQL Query Generation...")
 
         sql = self.sql_chain.invoke({
-            "schema": schema,
             "matched_symbols": matched_symbols,
             "conversation_history": conversation_text,
             "query": query
