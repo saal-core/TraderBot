@@ -6,11 +6,10 @@ import time
 import json
 import re
 from typing import Dict, List, Optional, Tuple, Any
-from langchain_community.llms import Ollama
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from src.config.settings import get_ollama_config, get_openai_config
+from src.config.settings import get_qwen_config, get_openai_config
 from src.services.chat_memory import ChatMemory
 from src.services.database_handler import DatabaseQueryHandler
 from src.services.internet_data_handler import InternetDataHandler
@@ -70,16 +69,25 @@ class ComparisonHandler:
                 api_key=openai_config["api_key"]
             )
         else:
-            ollama_config = get_ollama_config()
-            self.planning_llm = Ollama(
-                model=ollama_config["model_name"],
-                base_url=ollama_config["base_url"],
-                temperature=0.1
+            # Use QWEN H100 instead of local Ollama
+            qwen_config = get_qwen_config()
+            self.planning_llm = ChatOpenAI(
+                model=qwen_config["model_name"],
+                base_url=qwen_config["base_url"],
+                api_key=qwen_config["api_key"],
+                temperature=0.1,  # Low for structured planning
+                top_p=qwen_config.get("top_p", 0.8),
+                max_retries=2,
+                extra_body=qwen_config.get("extra_body", {})
             )
-            self.explanation_llm = Ollama(
-                model=ollama_config["model_name"],
-                base_url=ollama_config["base_url"],
-                temperature=ollama_config["temperature_comparison"]
+            self.explanation_llm = ChatOpenAI(
+                model=qwen_config["model_name"],
+                base_url=qwen_config["base_url"],
+                api_key=qwen_config["api_key"],
+                temperature=qwen_config.get("temperature", 0.7),
+                top_p=qwen_config.get("top_p", 0.8),
+                max_retries=2,
+                extra_body=qwen_config.get("extra_body", {})
             )
 
         # Create planning chain

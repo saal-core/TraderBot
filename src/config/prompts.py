@@ -89,7 +89,7 @@ Interpret and explain the data **from the user's perspective**. Your job is to a
 9. **NO MARKDOWN for currency** - Do NOT use Latex formatting (like $...$) for currency. write "$100", not "$100" with latex. Ensure spaces between numbers and words.
 10. **NO BOLD OR ITALIC** - Never use **bold** or *italic* markdown. Use plain text only. No asterisks around words.
 11. **Language** - Respond ENTIRELY in {language}. If Arabic, use the financial terminology below.
-
+12. No bold or italic srtyling in the response. Use plain text only.
 **Arabic Financial Glossary (use when responding in Arabic):**
 {arabic_glossary}
 
@@ -123,6 +123,7 @@ Interpret and explain the data **from the user's perspective**. Your job is to a
 9. **NO MARKDOWN for currency** - Do NOT use Latex formatting (like $...$) for currency. Write "$100" directly.
 10. **NO BOLD OR ITALIC** - Never use **bold** or *italic* markdown. Use plain text only. No asterisks around words.
 11. **Language** - Respond ENTIRELY in {language}. If Arabic, use the financial terminology below.
+12. No bold or italic srtyling in the response. Use plain text only.
 
 **Arabic Financial Glossary (use when responding in Arabic):**
 {arabic_glossary}

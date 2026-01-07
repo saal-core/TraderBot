@@ -1,14 +1,14 @@
 # src/services/llm_query_router.py
 """
-LLM-Only Query Router - Uses Ollama for all query classification with conversation context.
+LLM-Only Query Router - Uses QWEN H100 for all query classification with conversation context.
 """
 from typing import Dict, List, Optional
 import time
 
-from langchain_community.llms import Ollama
+from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from src.config.settings import get_ollama_config
+from src.config.settings import get_qwen_config
 from src.services.chat_memory import ChatMemory
 
 from dotenv import load_dotenv
@@ -65,7 +65,7 @@ Category:"""
 class LLMQueryRouter:
     """
     LLM-only query router with conversation history support.
-    Uses Ollama for all query classification.
+    Uses QWEN H100 for all query classification.
     """
 
     def __init__(self, model_name: str = None, memory_max_pairs: int = 5):
@@ -73,19 +73,23 @@ class LLMQueryRouter:
         Initialize the LLM router.
 
         Args:
-            model_name: Ollama model name
+            model_name: Model name (defaults to QWEN config)
             memory_max_pairs: Max Q&A pairs to include in context
         """
-        # Initialize Ollama
-        ollama_config = get_ollama_config()
-        self.model_name = model_name or ollama_config["model_name"]
-        self.base_url = ollama_config["base_url"]
+        # Initialize QWEN H100
+        qwen_config = get_qwen_config()
+        self.model_name = model_name or qwen_config["model_name"]
+        self.base_url = qwen_config["base_url"]
         
-        self.llm = Ollama(
+        self.llm = ChatOpenAI(
             model=self.model_name,
             base_url=self.base_url,
-            temperature=0.1,
-            num_predict=20,  # Small response expected
+            api_key=qwen_config["api_key"],
+            temperature=0.1,  # Low for classification accuracy
+            top_p=qwen_config.get("top_p", 0.8),
+            max_tokens=50,  # Small response expected
+            max_retries=2,
+            extra_body=qwen_config.get("extra_body", {})
         )
         
         # Chat memory for formatting history
@@ -98,7 +102,7 @@ class LLMQueryRouter:
         )
         self.chain = self.prompt | self.llm | StrOutputParser()
         
-        print(f"✅ LLM Query Router initialized with model: {self.model_name}")
+        print(f"✅ LLM Query Router initialized with QWEN H100: {self.model_name}")
 
     def _format_conversation_history(self, chat_history: List[Dict[str, str]]) -> str:
         """Format conversation history for the prompt."""

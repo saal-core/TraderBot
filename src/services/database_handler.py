@@ -48,21 +48,30 @@ class DatabaseQueryHandler:
         self.base_url = ollama_config["base_url"]
         self.temperature = ollama_config["temperature_sql"]
 
-        self.llm = Ollama(
-            model=self.model_name,
-            base_url=self.base_url,
-            temperature=self.temperature
+        # CONFIG CHANGE: Using QWEN (H100) for SQL Generation for testing
+        qwen_config = get_qwen_config()
+        print(f"🚀 Switching SQL Generation to QWEN H100 (Testing Mode)")
+        
+        self.llm = ChatOpenAI(
+            model=qwen_config.get("model_name", "Qwen3-30B-A3B"),
+            base_url=qwen_config["base_url"],
+            api_key=qwen_config["api_key"],
+            temperature=0.1,  # Low temperature for SQL precision
+            top_p=qwen_config.get("top_p", 0.8),
+            max_retries=2,
+            extra_body=qwen_config.get("extra_body", {})
         )
 
         # Use QWEN (H100) for explanations - faster than local Ollama
-        qwen_config = get_qwen_config()
         self.explanation_llm = ChatOpenAI(
             model=qwen_config.get("model_name", "Qwen3-30B-A3B"),
             base_url=qwen_config["base_url"],
             api_key=qwen_config["api_key"],
-            temperature=qwen_config.get("temperature", 0.3),
+            temperature=qwen_config.get("temperature", 0.7),
+            top_p=qwen_config.get("top_p", 0.8),
             max_retries=2,
-            streaming=True  # Enable streaming
+            streaming=True,  # Enable streaming
+            extra_body=qwen_config.get("extra_body", {})
         )
 
         # Load custom prompt template

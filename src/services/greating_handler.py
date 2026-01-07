@@ -1,9 +1,9 @@
 
 from typing import Dict, List, Tuple, Optional
-from langchain_community.llms import Ollama
+from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from src.config.settings import get_ollama_config
+from src.config.settings import get_qwen_config
 from src.services.chat_memory import ChatMemory
 import os
 import time
@@ -14,27 +14,33 @@ load_dotenv()
 class GreetingHandler:
     """Handles greetings and chitchat with conversation memory"""
 
-    def __init__(self, model_name: str = None, ollama_base_url: str = None, memory_max_pairs: int = 5):
+    def __init__(self, model_name: str = None, base_url: str = None, memory_max_pairs: int = 5):
         """
         Initialize the greeting handler
 
         Args:
-            model_name: Name of the Ollama model to use (defaults to config)
-            ollama_base_url: Base URL for Ollama API (defaults to config)
+            model_name: Name of the model to use (defaults to QWEN config)
+            base_url: Base URL for QWEN API (defaults to config)
             memory_max_pairs: Maximum number of Q&A pairs to remember (default: 5)
         """
-        ollama_config = get_ollama_config()
+        qwen_config = get_qwen_config()
 
-        self.model_name = model_name or ollama_config["model_name"]
-        self.base_url = ollama_base_url or ollama_config["base_url"]
-        self.temperature = ollama_config["temperature_greeting"]
+        self.model_name = model_name or qwen_config["model_name"]
+        self.base_url = base_url or qwen_config["base_url"]
+        self.temperature = qwen_config.get("temperature", 0.3)
         self.chat_memory = ChatMemory(max_pairs=memory_max_pairs)
 
-        self.llm = Ollama(
+        self.llm = ChatOpenAI(
             model=self.model_name,
             base_url=self.base_url,
-            temperature=self.temperature
+            api_key=qwen_config["api_key"],
+            temperature=self.temperature,
+            top_p=qwen_config.get("top_p", 0.8),
+            max_retries=2,
+            extra_body=qwen_config.get("extra_body", {})
         )
+        
+        print(f"✅ GreetingHandler initialized with QWEN H100: {self.model_name}")
 
         self.greeting_prompt = PromptTemplate(
             input_variables=["query", "chat_history"],

@@ -14,14 +14,13 @@ from langchain_core.output_parsers import StrOutputParser
 from src.services.fmp_service import FMPService
 from src.services.perplexity_service import PerplexityService
 from src.services.chat_memory import ChatMemory
-from src.config.settings import get_qwen_config, get_ollama_config
+from src.config.settings import get_qwen_config
 from src.config.prompts import (
     INTERNET_DATA_EXPLANATION_PROMPT,
     STANDALONE_QUESTION_USER_PROMPT,
     detect_language,
     ARABIC_FINANCIAL_GLOSSARY
 )
-from langchain_community.llms import Ollama
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -50,8 +49,10 @@ class InternetDataHandler:
             model=qwen_config.get("model_name", "Qwen3-30B-A3B"),
             base_url=qwen_config["base_url"],
             api_key=qwen_config["api_key"],
-            temperature=qwen_config.get("temperature", 0.3),
-            streaming=True
+            temperature=qwen_config.get("temperature", 0.7),
+            top_p=qwen_config.get("top_p", 0.8),
+            streaming=True,
+            extra_body=qwen_config.get("extra_body", {})
         )
         self.llm_type = "QWEN H100"  # For logging purposes
 
@@ -75,14 +76,18 @@ class InternetDataHandler:
             "berkshire": "BRK-B",
         }
         
-        # Initialize Ollama for query rewriting (lightweight, fast)
-        ollama_config = get_ollama_config()
-        self.rewrite_llm = Ollama(
-            model=ollama_config["model_name"],
-            base_url=ollama_config["base_url"],
-            temperature=0.1,
-            num_predict=100,  # Short response expected
+        # Initialize QWEN H100 for query rewriting (fast, OpenAI-compatible)
+        self.rewrite_llm = ChatOpenAI(
+            model=qwen_config.get("model_name", "Qwen3-30B-A3B"),
+            base_url=qwen_config["base_url"],
+            api_key=qwen_config["api_key"],
+            temperature=0.1,  # Low for accurate rewriting
+            top_p=qwen_config.get("top_p", 0.8),
+            max_tokens=100,  # Short response expected
+            max_retries=2,
+            extra_body=qwen_config.get("extra_body", {})
         )
+        print(f"✅ InternetDataHandler initialized with QWEN H100 for all LLM tasks")
 
     def _rewrite_query(self, query: str, chat_history: List[Dict[str, str]]) -> str:
         """
@@ -145,8 +150,9 @@ class InternetDataHandler:
                 question=query
             )
             
-            rewritten = self.rewrite_llm.invoke(prompt)
-            rewritten = rewritten.strip()
+            response = self.rewrite_llm.invoke(prompt)
+            # Handle AIMessage response from ChatOpenAI
+            rewritten = response.content.strip() if hasattr(response, 'content') else str(response).strip()
             
             # Clean up any prefixes the LLM might add
             for prefix in ["Standalone Question:", "Question:", "Rewritten:"]:

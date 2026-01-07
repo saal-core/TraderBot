@@ -109,6 +109,9 @@ def get_fmp_config() -> Dict[str, Any]:
 def get_qwen_config() -> Dict[str, Any]:
     """
     Get QWEN configuration as a dictionary (H100 via OpenAI-compatible API)
+    
+    Uses Qwen team recommended settings:
+    - temperature=0.7, top_p=0.8, top_k=20, repetition_penalty=1.05
 
     Returns:
         Dictionary containing QWEN configuration
@@ -117,7 +120,14 @@ def get_qwen_config() -> Dict[str, Any]:
         "base_url": os.getenv("QWEN_BASE_URL", "http://192.168.71.72:8080/v1"),
         "api_key": os.getenv("QWEN_API_KEY", "123"),
         "model_name": os.getenv("QWEN_MODEL", "qwen3-30b-3b"),
-        "temperature": float(os.getenv("QWEN_TEMPERATURE", "0.3")),
+        # Qwen team recommended settings
+        "temperature": float(os.getenv("QWEN_TEMPERATURE", "0.7")),
+        "top_p": float(os.getenv("QWEN_TOP_P", "0.8")),
+        # Extra parameters for OpenAI-compatible servers (vLLM, TGI, etc.)
+        "extra_body": {
+            "top_k": int(os.getenv("QWEN_TOP_K", "20")),
+            "repetition_penalty": float(os.getenv("QWEN_REPETITION_PENALTY", "1.05")),
+        }
     }
 
 
