@@ -6,11 +6,10 @@ Supports both comparison queries AND general hybrid queries.
 import time
 import json
 import re
-from typing import Dict, List, Optional, Tuple, Any
-from langchain_openai import ChatOpenAI
+from typing import Dict, List, Optional, Tuple, Any, AsyncGenerator
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from src.config.settings import get_qwen_config, get_openai_config
+from src.config.llm_provider import get_llm, get_streaming_llm, get_active_provider, get_provider_config
 from src.services.chat_memory import ChatMemory
 from src.services.database_handler import DatabaseQueryHandler
 from src.services.internet_data_handler import InternetDataHandler
@@ -45,54 +44,25 @@ class ComparisonHandler:
             db_handler: Existing DatabaseQueryHandler instance (or creates new one)
             internet_handler: Existing InternetDataHandler instance (or creates new one)
             sql_executor: SQL executor for database queries
-            use_openai: Whether to use OpenAI for planning/explanation (True) or Ollama (False)
+            use_openai: Deprecated - now uses LLM_PROVIDER env var
             memory_max_pairs: Maximum number of Q&A pairs to remember
         """
         # Initialize or use existing handlers
-        self.db_handler = db_handler or DatabaseQueryHandler(
-            sql_executor=sql_executor, 
-            use_openai=use_openai
-        )
+        self.db_handler = db_handler or DatabaseQueryHandler(sql_executor=sql_executor)
         self.internet_handler = internet_handler or InternetDataHandler(
             memory_max_pairs=memory_max_pairs
         )
         self.sql_executor = sql_executor
         self.chat_memory = ChatMemory(max_pairs=memory_max_pairs)
 
-        # Initialize LLM for planning and explanation
-        if use_openai:
-            openai_config = get_openai_config()
-            self.planning_llm = ChatOpenAI(
-                model=openai_config["model_name"],
-                temperature=0.1,  # Low temperature for structured planning
-                api_key=openai_config["api_key"]
-            )
-            self.explanation_llm = ChatOpenAI(
-                model=openai_config["model_name"],
-                temperature=0.3,  # Slightly higher for natural explanations
-                api_key=openai_config["api_key"]
-            )
-        else:
-            # Use QWEN H100 instead of local Ollama
-            qwen_config = get_qwen_config()
-            self.planning_llm = ChatOpenAI(
-                model=qwen_config["model_name"],
-                base_url=qwen_config["base_url"],
-                api_key=qwen_config["api_key"],
-                temperature=0.1,  # Low for structured planning
-                top_p=qwen_config.get("top_p", 0.8),
-                max_retries=2,
-                extra_body=qwen_config.get("extra_body", {})
-            )
-            self.explanation_llm = ChatOpenAI(
-                model=qwen_config["model_name"],
-                base_url=qwen_config["base_url"],
-                api_key=qwen_config["api_key"],
-                temperature=qwen_config.get("temperature", 0.7),
-                top_p=qwen_config.get("top_p", 0.8),
-                max_retries=2,
-                extra_body=qwen_config.get("extra_body", {})
-            )
+        # Get LLM from provider configuration
+        provider = get_active_provider()
+        
+        # LLM for planning (low temperature for structured output)
+        self.planning_llm = get_llm(temperature=0.1)
+        
+        # LLM for explanation (higher temperature for natural text)
+        self.explanation_llm = get_streaming_llm(temperature=0.7)
 
         # Create planning chain
         self.plan_prompt = PromptTemplate(
@@ -129,7 +99,7 @@ class ComparisonHandler:
         )
         self.hybrid_explain_chain = self.hybrid_explain_prompt | self.explanation_llm | StrOutputParser()
 
-        print("✅ ComparisonHandler initialized (supports comparison + hybrid queries)")
+        print(f"✅ ComparisonHandler initialized with {provider.upper()} (supports comparison + hybrid queries)")
 
     def _plan_comparison(self, query: str) -> Dict[str, Any]:
         """
@@ -692,3 +662,43 @@ class ComparisonHandler:
             response["content"] = f"❌ Error processing hybrid query: {str(e)}"
 
         return response
+
+    async def stream_analysis(
+        self,
+        query: str,
+        context: Dict[str, Any]
+    ) -> AsyncGenerator[str, None]:
+        """
+        Stream an analysis based on the provided query and context data.
+        """
+        # Format context into a readable string
+        context_str = ""
+        for step_id, result in context.items():
+            context_str += f"\n--- Data from Step {step_id} ---\n"
+            if isinstance(result, list) and result:
+                # It's likely database rows
+                try:
+                    import pandas as pd
+                    df = pd.DataFrame(result)
+                    context_str += dataframe_to_toon(df, f"Step_{step_id}_Data")
+                except:
+                    context_str += str(result)
+            else:
+                context_str += str(result)
+
+        prompt = f"""You are a financial analyst.
+User Query: {query}
+
+Available Data:
+{context_str}
+
+Analyze the data and answer the user's question directly. 
+Verify if the data supports the answer.
+If comparing, highlight key differences.
+Use HTML formatting just like other explanations (span class="currency", etc).
+
+Analysis:"""
+
+        # Stream response
+        async for chunk in self.explanation_llm.astream(prompt):
+             yield chunk.content

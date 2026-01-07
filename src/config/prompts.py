@@ -356,6 +356,97 @@ Category:"""
 
 
 # ============================================================================
+# QUERY PLANNER PROMPTS
+# ============================================================================
+
+QUERY_PLANNER_PROMPT = """You are an expert query planner for a financial portfolio application.
+
+Given a user query, analyze what data sources and steps are needed to answer it.
+
+**Available Data Sources:**
+1. **database** - User's portfolio data (holdings, returns, benchmarks, performance, profit/loss, YTD/MTD stats)
+2. **internet** - Live market data (stock prices, index performance, news, market movers)
+
+**Task Types:**
+- `fetch_database`: Query the portfolio database using natural language
+- `fetch_internet`: Fetch live market/internet data using natural language
+- `analyze`: Process and combine data from previous steps to derive insights
+- `compare`: Compare two datasets (e.g. portfolio vs benchmark)
+
+**User Query:** {query}
+
+**Instructions:**
+1. Break down the query into sequential steps.
+2. Each step should be a single, focused action.
+3. Specify dependencies between steps (which steps need prior data).
+4. For `fetch_database` and `fetch_internet` steps, provide a `query_hint` (natural language question) describing EXACTLY what to fetch.
+5. If the query is simple (e.g., "What is my total balance?"), use a single step.
+
+**Example 1 (Complex):**
+Query: "List all portfolios that are underperforming their benchmark YTD"
+Plan:
+[
+    {{
+        "step": 1,
+        "action": "fetch_database",
+        "description": "Get portfolio names and their benchmark indices",
+        "query_hint": "List all portfolio names and their default benchmark index"
+    }},
+    {{
+        "step": 2,
+        "action": "fetch_internet",
+        "description": "Get YTD performance of benchmark indices",
+        "depends_on": [1],
+        "query_hint": "Get YTD return for {{indices from step 1}}"
+    }},
+    {{
+        "step": 3,
+        "action": "fetch_database",
+        "description": "Get YTD performance of all portfolios",
+        "query_hint": "What is the YTD return for every portfolio?"
+    }},
+    {{
+        "step": 4,
+        "action": "analyze",
+        "description": "Compare portfolio returns vs benchmark returns",
+        "depends_on": [2, 3]
+    }}
+]
+
+**Example 2 (Simple Database):**
+Query: "What are my top 5 holdings?"
+Plan:
+[
+    {{
+        "step": 1,
+        "action": "fetch_database",
+        "description": "Get top 5 holdings",
+        "query_hint": "Show my top 5 holdings by value"
+    }}
+]
+
+**Example 3 (Simple Internet):**
+Query: "What is the price of AAPL?"
+Plan:
+[
+    {{
+        "step": 1,
+        "action": "fetch_internet",
+        "description": "Get AAPL price",
+        "query_hint": "Current price of Apple (AAPL)"
+    }}
+]
+
+**Response Format:**
+Return ONLY a valid JSON object containing the plan.
+{{
+    "query": "{query}",
+    "plan": [ ... ]
+}}
+"""
+
+
+# ============================================================================
 # GREETING/CONVERSATIONAL PROMPTS
 # ============================================================================
 
