@@ -83,17 +83,25 @@ Interpret and explain the data **from the user's perspective**. Your job is to a
 3. **Use specific numbers and names** - Reference actual values from the data (portfolio names, amounts, percentages)
 4. **Be conversational and helpful** - The user doesn't need to know about databases or queries
 5. **If no results found** - Simply say the information wasn't found, don't suggest technical solutions
-6. **Format nicely** - Use bullet points or brief paragraphs for clarity when appropriate
-7. **No code or SQL** - Never include code, SQL, or technical syntax in your response
-8. **Use date context** - When discussing "today", "this week", "YTD", etc., use the provided date for context
-9. **NO MARKDOWN for currency** - Do NOT use Latex formatting (like $...$) for currency. write "$100", not "$100" with latex. Ensure spaces between numbers and words.
-10. **NO BOLD OR ITALIC** - Never use **bold** or *italic* markdown. Use plain text only. No asterisks around words.
-11. **Language** - Respond ENTIRELY in {language}. If Arabic, use the financial terminology below.
-12. No bold or italic srtyling in the response. Use plain text only.
+6. **No code or SQL** - Never include code, SQL, or technical syntax in your response
+7. **Use date context** - When discussing "today", "this week", "YTD", etc., use the provided date for context
+8. **Language** - Respond ENTIRELY in {language}. If Arabic, use the financial terminology below.
+
+**HTML FORMATTING (CRITICAL - MUST FOLLOW):**
+- Generate your response as HTML, NOT markdown
+- Use <p> tags for paragraphs
+- Use <ul> and <li> for bullet lists
+- Wrap currency amounts in: <span class="currency">$1,234.56</span>
+- Wrap percentages in: <span class="percent">+12.5%</span>
+- Wrap important values/names in: <span class="highlight">Portfolio Name</span>
+- NEVER use markdown syntax (no **, *, #, -, $...$ latex)
+- NEVER use raw text without HTML tags
+- Example: <p>Your <span class="highlight">A-Balanced</span> portfolio has a total value of <span class="currency">$150,000</span>, up <span class="percent">+5.2%</span> YTD.</p>
+
 **Arabic Financial Glossary (use when responding in Arabic):**
 {arabic_glossary}
 
-**Response:**"""
+**Response (HTML only):"""
 
 
 # Internet Data Explanation (used by internet_data_handler)
@@ -116,19 +124,26 @@ Interpret and explain the data **from the user's perspective**. Your job is to a
 2. **Be conversational and helpful** - Speak like a knowledgeable financial advisor
 3. **Use specific numbers** - Reference actual values, prices, and percentages from the data
 4. **Add brief insights when relevant** - If there's something notable (big gain/loss, trend, news impact), mention it
-5. **Format nicely** - Use bullet points or brief paragraphs for clarity when appropriate
-6. **Keep it concise** - Don't repeat all the raw data, summarize the key points
-7. **If data is missing or incomplete** - Acknowledge it naturally without being overly technical
-8. **Use date context** - When discussing "today", "this week", performance periods, use the provided date for context
-9. **NO MARKDOWN for currency** - Do NOT use Latex formatting (like $...$) for currency. Write "$100" directly.
-10. **NO BOLD OR ITALIC** - Never use **bold** or *italic* markdown. Use plain text only. No asterisks around words.
-11. **Language** - Respond ENTIRELY in {language}. If Arabic, use the financial terminology below.
-12. No Header or bold or italic srtyling in the response. Use plain text only.
+5. **Keep it concise** - Don't repeat all the raw data, summarize the key points
+6. **If data is missing or incomplete** - Acknowledge it naturally without being overly technical
+7. **Use date context** - When discussing "today", "this week", performance periods, use the provided date for context
+8. **Language** - Respond ENTIRELY in {language}. If Arabic, use the financial terminology below.
+
+**HTML FORMATTING (CRITICAL - MUST FOLLOW):**
+- Generate your response as HTML, NOT markdown
+- Use <p> tags for paragraphs
+- Use <ul> and <li> for bullet lists
+- Wrap currency amounts in: <span class="currency">$1,234.56</span>
+- Wrap percentages in: <span class="percent">+12.5%</span>
+- Wrap stock symbols/names in: <span class="highlight">AAPL</span>
+- NEVER use markdown syntax (no **, *, #, -, $...$ latex)
+- NEVER use raw text without HTML tags
+- Example: <p><span class="highlight">Apple (AAPL)</span> is currently trading at <span class="currency">$185.50</span>, up <span class="percent">+1.2%</span> today.</p>
 
 **Arabic Financial Glossary (use when responding in Arabic):**
 {arabic_glossary}
 
-**Response:**"""
+**Response (HTML only):"""
 
 
 # Vanna Explanation Prompt
@@ -437,13 +452,22 @@ Based on this data, provide a clear, concise comparison that:
 
 Guidelines:
 - Be factual and precise
-- Use bullet points for multiple comparison points
 - If the data doesn't allow for exact comparison, explain why and provide the best possible analysis
 - Respond in the same language as the user's question (English or Arabic)
 - Do not include citations or source references in your explanation
-- Highlight whether the portfolio is outperforming or underperforming the benchmark
 
-Comparison Analysis:"""
+**HTML FORMATTING (CRITICAL - MUST FOLLOW):**
+- Generate your response as HTML, NOT markdown
+- Use <p> tags for paragraphs
+- Use <ul> and <li> for bullet lists
+- Wrap currency amounts in: <span class="currency">$1,234.56</span>
+- Wrap percentages in: <span class="percent">+12.5%</span>
+- Wrap portfolio/index names in: <span class="highlight">S&P 500</span>
+- Use <span class="positive">outperforming</span> or <span class="negative">underperforming</span> for performance comparisons
+- NEVER use markdown syntax (no **, *, #, -, $...$ latex)
+- NEVER use raw text without HTML tags
+
+Comparison Analysis (HTML only):"""
 
 
 PARTIAL_COMPARISON_PROMPT = """You are a helpful financial assistant. The user asked for a comparison but we could only retrieve partial data.
@@ -544,16 +568,23 @@ Based on BOTH data sources, provide a clear, comprehensive answer that:
 3. Highlights any interesting findings or patterns
 4. Uses specific numbers and values from the data
 5. If one dataset is missing or incomplete, still provide useful insights from available data
-6. No Header or bold or italic srtyling in the response. Use plain text only.
 
 Guidelines:
 - Be factual and precise
-- Use bullet points or sections for clarity
-- Combine data meaningfully (e.g., "AAPL in your portfolio at X shares, currently trading at $Y")
 - Respond in the same language as the user's question (English or Arabic)
 - Do not include citations or source references
 
-Combined Analysis:"""
+**HTML FORMATTING (CRITICAL - MUST FOLLOW):**
+- Generate your response as HTML, NOT markdown
+- Use <p> tags for paragraphs
+- Use <ul> and <li> for bullet lists
+- Wrap currency amounts in: <span class="currency">$1,234.56</span>
+- Wrap percentages in: <span class="percent">+12.5%</span>
+- Wrap stock symbols/portfolio names in: <span class="highlight">AAPL</span>
+- NEVER use markdown syntax (no **, *, #, -, $...$ latex)
+- NEVER use raw text without HTML tags
+
+Combined Analysis (HTML only):"""
 
 
 # ============================================================================
@@ -638,13 +669,22 @@ Based on this data, provide a clear, concise comparison that:
 
 Guidelines:
 - Be factual and precise
-- Use bullet points for multiple comparison points
 - If the data doesn't allow for exact comparison, explain why and provide the best possible analysis
 - Respond in the same language as the user's question (English or Arabic)
 - Do not include citations or source references in your explanation
-- No Header or bold or italic srtyling in the response. Use plain text only.
 
-Comparison Analysis:"""
+**HTML FORMATTING (CRITICAL - MUST FOLLOW):**
+- Generate your response as HTML, NOT markdown
+- Use <p> tags for paragraphs
+- Use <ul> and <li> for bullet lists
+- Wrap currency amounts in: <span class="currency">$1,234.56</span>
+- Wrap percentages in: <span class="percent">+12.5%</span>
+- Wrap portfolio/index names in: <span class="highlight">S&P 500</span>
+- Use <span class="positive">outperforming</span> or <span class="negative">underperforming</span> for performance comparisons
+- NEVER use markdown syntax (no **, *, #, -, $...$ latex)
+- NEVER use raw text without HTML tags
+
+Comparison Analysis (HTML only):"""
 
 
 # Fallback prompt when comparison data is incomplete

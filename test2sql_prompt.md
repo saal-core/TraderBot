@@ -330,6 +330,9 @@ Input Variables:
 - **Symbol Mentions:** {matched_symbols}
 - **Current Question:** {query}
 
+**Portfolio Context (Available Portfolios/Accounts/Indices):**
+{portfolio_context}
+
 **Task:**
 Generate a valid PostgreSQL query for the `ai_trading` schema to answer the user's question. 
 

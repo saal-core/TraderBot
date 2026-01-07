@@ -10,9 +10,14 @@ load_dotenv()
 # PUT YOUR SQL QUERY HERE
 # ============================================
 sql_query = """
-SELECT *
-FROM ai_trading.portfolio_summary ps
-LIMIT 10;
+SELECT 
+    ps.default_index
+FROM 
+    ai_trading.portfolio_summary ps
+WHERE 
+    ps.datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_summary)
+    AND ps.is_active = 1
+    AND ps.portfolio_name = 'A-Balanced';
 """
 # ============================================
 
