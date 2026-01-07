@@ -9,6 +9,7 @@ def clean_llm_response(text: str) -> str:
     """
     Clean a complete LLM response for display.
     Removes thinking tokens, extra whitespace, and formatting artifacts.
+    Preserves HTML styling tags for styled responses.
     
     Args:
         text: Raw LLM response text
@@ -22,8 +23,14 @@ def clean_llm_response(text: str) -> str:
     # Remove thinking tokens (e.g., <think>...</think> from Qwen3)
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
     
-    # Remove any remaining XML-like tags
-    text = re.sub(r'<[^>]+>', '', text)
+    # Remove partial thinking tags at boundaries
+    text = re.sub(r'<think>.*$', '', text, flags=re.DOTALL)
+    text = re.sub(r'^.*?</think>', '', text, flags=re.DOTALL)
+    
+    # NOTE: We no longer strip HTML tags because we now use styled HTML responses
+    # Only remove truly unwanted tags (think, etc.) but preserve p, span, ul, li, div
+    # If you need to remove specific non-HTML tags, do it explicitly:
+    # text = re.sub(r'<(?!/?(?:p|span|ul|li|ol|div|br|strong|em)[^>]*>)[^>]+>', '', text)
     
     # Remove excessive whitespace while preserving paragraph structure
     text = re.sub(r'\n{3,}', '\n\n', text)

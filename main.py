@@ -51,6 +51,37 @@ st.markdown("""
         color: #718096;
         font-style: italic;
     }
+    /* HTML Response Styling */
+    .response-content p {
+        margin-bottom: 0.8rem;
+        line-height: 1.6;
+    }
+    .response-content ul {
+        margin: 0.5rem 0;
+        padding-left: 1.5rem;
+    }
+    .response-content li {
+        margin-bottom: 0.4rem;
+    }
+    .currency {
+        color: #48bb78;
+        font-weight: 600;
+    }
+    .percent {
+        font-weight: 600;
+    }
+    .highlight {
+        color: #63b3ed;
+        font-weight: 600;
+    }
+    .positive {
+        color: #48bb78;
+        font-weight: 600;
+    }
+    .negative {
+        color: #fc8181;
+        font-weight: 600;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -157,16 +188,16 @@ def process_streaming_query(question: str):
                     content = evt.get("content", "")
                     if content:
                         full_response += content
-                        # Display as plain text with cursor
-                        response_placeholder.text(full_response + "▌")
+                        # Display as HTML with cursor
+                        response_placeholder.markdown(f'<div class="response-content">{full_response}</div>▌', unsafe_allow_html=True)
                     status_placeholder.empty()
                     
                 elif event_type == "assistant_message_complete":
                     data = evt.get("data", {})
                     final_data.update(data)
                     status_placeholder.empty()
-                    # Final render - show complete response as plain text
-                    response_placeholder.text(full_response)
+                    # Final render - show complete response as HTML
+                    response_placeholder.markdown(f'<div class="response-content">{full_response}</div>', unsafe_allow_html=True)
                     
                     # Update router classification if not already shown
                     if final_data.get("query_type") and type_placeholder:
@@ -193,14 +224,14 @@ def process_streaming_query(question: str):
                     
                 elif event_type == "stream_end":
                     # Final render without cursor
-                    response_placeholder.text(full_response)
+                    response_placeholder.markdown(f'<div class="response-content">{full_response}</div>', unsafe_allow_html=True)
                     break
                     
             except json.JSONDecodeError:
                 continue
         
         # Ensure final display is clean
-        response_placeholder.text(full_response)
+        response_placeholder.markdown(f'<div class="response-content">{full_response}</div>', unsafe_allow_html=True)
         
         # Update final_data with the full streamed response
         if full_response:
@@ -334,8 +365,8 @@ for message in st.session_state.messages:
             if message.get("query_type"):
                 st.info(f"🔍 **Router Classification:** {message['query_type']}")
             
-            # Show response content
-            st.text(message["content"])
+            # Show response content as HTML
+            st.markdown(f'<div class="response-content">{message["content"]}</div>', unsafe_allow_html=True)
             
             # 2. Show SQL query in foldable expander
             if message.get("sql_query"):

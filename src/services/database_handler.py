@@ -41,6 +41,7 @@ class DatabaseQueryHandler:
         """
         self.sql_executor = sql_executor
         self._symbols_cache = None
+        self._portfolio_context_cache = None  # Cache for portfolio context
         self.chat_memory = ChatMemory(max_pairs=memory_max_pairs)
 
         ollama_config = get_ollama_config()
@@ -77,9 +78,9 @@ class DatabaseQueryHandler:
         # Load custom prompt template
         self.custom_prompt_template = self._load_custom_prompt()
 
-        # Create prompt template with dynamic data including conversation history
+        # Create prompt template with dynamic data including conversation history and portfolio context
         self.sql_prompt = PromptTemplate(
-            input_variables=["query", "matched_symbols", "conversation_history"],
+            input_variables=["query", "matched_symbols", "conversation_history", "portfolio_context"],
             template=self.custom_prompt_template
         )
 
@@ -154,6 +155,60 @@ class DatabaseQueryHandler:
         except Exception as e:
             print(f"Error fetching symbols: {e}")
             return {}
+
+    def _get_portfolio_context(self) -> str:
+        """
+        Fetch portfolio context (names, account IDs, indices) from database for SQL generation.
+        Returns formatted string with this context information.
+        """
+        if self._portfolio_context_cache is not None:
+            return self._portfolio_context_cache
+
+        if not self.sql_executor:
+            return "No portfolio context available."
+
+        try:
+            query = """
+            SELECT DISTINCT 
+                portfolio_name, 
+                account_id, 
+                default_index
+            FROM ai_trading.portfolio_summary
+            WHERE datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_summary WHERE is_active = 1)
+              AND is_active = 1
+            ORDER BY portfolio_name
+            """
+            success, df, _ = self.sql_executor.execute_query(query)
+            
+            if success and df is not None and not df.empty:
+                # Format portfolio names
+                portfolio_names = df['portfolio_name'].dropna().unique().tolist()
+                account_ids = df['account_id'].dropna().unique().tolist()
+                
+                # Format as a context string
+                context_parts = []
+                context_parts.append(f"**Available Portfolio Names:** {', '.join(portfolio_names)}")
+                context_parts.append(f"**Available Account IDs:** {', '.join(account_ids)}")
+                
+                # Add portfolio-index mapping
+                index_mapping = []
+                for _, row in df.iterrows():
+                    if row['portfolio_name'] and row['default_index']:
+                        index_mapping.append(f"  - {row['portfolio_name']}: {row['default_index']}")
+                
+                if index_mapping:
+                    context_parts.append("**Portfolio Default Indices:**\n" + "\n".join(index_mapping))
+                
+                context_str = "\n".join(context_parts)
+                self._portfolio_context_cache = context_str
+                print(f"📋 Loaded portfolio context: {len(portfolio_names)} portfolios, {len(account_ids)} accounts")
+                return context_str
+            
+            return "No portfolio context available."
+            
+        except Exception as e:
+            print(f"Error fetching portfolio context: {e}")
+            return "No portfolio context available."
 
     def _extract_stock_mentions(self, query: str) -> List[str]:
         """Extract potential stock mentions from query using LLM"""
@@ -266,6 +321,9 @@ class DatabaseQueryHandler:
             matched_symbols = self._fuzzy_match_symbols(mentioned_terms, symbols_dict)
             print(f"  → {matched_symbols}")
 
+        # Get portfolio context for better SQL generation
+        portfolio_context = self._get_portfolio_context()
+
         # Generate SQL
         start_time = time.time()
         print(f"⏱️  SQL Query Generation...")
@@ -273,6 +331,7 @@ class DatabaseQueryHandler:
         sql = self.sql_chain.invoke({
             "matched_symbols": matched_symbols,
             "conversation_history": conversation_text,
+            "portfolio_context": portfolio_context,
             "query": query
         })
 
