@@ -188,8 +188,8 @@ WHERE is_active = 1
 ```sql
 SELECT portfolio_name, last_updated_time 
 FROM ai_trading.portfolio_summary 
-WHERE portfolio_name = :PORTFOLIO_1
-ORDER BY datetime DESC LIMIT 1;
+WHERE datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_summary)
+ORDER BY last_updated_time DESC;
 ```
 
 **"Which portfolios have not been updated recently?"** (more than 7 days)
@@ -233,8 +233,7 @@ LIMIT 1;
 ```sql
 SELECT symbol, positions, market_value 
 FROM ai_trading.portfolio_holdings 
-WHERE portfolio_name = :PORTFOLIO_1 
-  AND datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_holdings WHERE portfolio_name = :PORTFOLIO_1)
+WHERE datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_holdings)
 ORDER BY market_value DESC;
 ```
 
@@ -242,9 +241,9 @@ ORDER BY market_value DESC;
 ```sql
 SELECT portfolio_name, SUM(market_value) AS total_market_value
 FROM ai_trading.portfolio_holdings 
-WHERE portfolio_name = :PORTFOLIO_1
-  AND datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_holdings WHERE portfolio_name = :PORTFOLIO_1)
-GROUP BY portfolio_name;
+WHERE datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_holdings)
+GROUP BY portfolio_name
+ORDER BY total_market_value DESC;
 ```
 
 **"How many positions are currently held in each portfolio?"**

@@ -59,7 +59,8 @@ class AppState:
             "database": 0,
             "greeting": 0,
             "internet_data": 0,
-            "comparison": 0
+            "comparison": 0,
+            "hybrid": 0
         }
 
     def reset_stats(self):
@@ -67,7 +68,8 @@ class AppState:
             "database": 0,
             "greeting": 0,
             "internet_data": 0,
-            "comparison": 0
+            "comparison": 0,
+            "hybrid": 0
         }
 
 
@@ -540,6 +542,7 @@ async def get_stats():
         greeting=app_state.query_stats["greeting"],
         internet_data=app_state.query_stats["internet_data"],
         comparison=app_state.query_stats["comparison"],
+        hybrid=app_state.query_stats["hybrid"],
         total=total
     )
 
@@ -717,6 +720,24 @@ async def stream_query_response(query: str, chat_history: List[Dict[str, str]]):
             yield generate_sse_event("content", cleaned_content)
             response_data["final_answer"] = cleaned_content
             app_state.query_stats["comparison"] += 1
+            
+        elif query_type == "hybrid":
+            yield generate_sse_event("status", {"message": "Processing hybrid query (database + market data)..."})
+            await asyncio.sleep(0.01)
+            
+            result = app_state.comparison_handler.process_hybrid(query, chat_history)
+            cleaned_content = clean_response_content(result.get("content", ""))
+            
+            response_data["sql_query"] = result.get("sql_query")
+            response_data["results"] = dataframe_to_list(result.get("results_df"))
+            response_data["hybrid_plan"] = result.get("hybrid_plan")
+            response_data["database_data"] = result.get("database_data")
+            response_data["internet_data"] = result.get("internet_data")
+            
+            # Stream content
+            yield generate_sse_event("content", cleaned_content)
+            response_data["final_answer"] = cleaned_content
+            app_state.query_stats["hybrid"] += 1
             
         else:
             yield generate_sse_event("error", {"error": f"Unknown query type: {query_type}"})

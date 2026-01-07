@@ -87,6 +87,75 @@ class InternetDataHandler:
             max_retries=2,
             extra_body=qwen_config.get("extra_body", {})
         )
+
+        # Initialize QWEN H100 for query classification (fast, low temp)
+        self.classify_llm = ChatOpenAI(
+            model=qwen_config.get("model_name", "Qwen3-30B-A3B"),
+            base_url=qwen_config["base_url"],
+            api_key=qwen_config["api_key"],
+            temperature=0.1,  # Very low for consistent classification
+            top_p=qwen_config.get("top_p", 0.8),
+            max_tokens=30,  # Only need category name
+            max_retries=2,
+            extra_body=qwen_config.get("extra_body", {})
+        )
+
+        # Classification prompt template with explicit category descriptions
+        self.classify_prompt = """You are a financial query classifier. Classify the following query into exactly ONE category.
+
+**CATEGORIES AND THEIR USES:**
+
+1. **HYPOTHETICAL_INVESTMENT** - For "what if" investment scenarios
+   - Use when: User asks about hypothetical past investments
+   - Examples: "If I had invested $1000 in Tesla in 2020", "How much would $5000 in NVIDIA be worth today"
+   - Data: Fetches historical prices and calculates returns
+
+2. **MARKET_MOVERS** - For market performance rankings
+   - Use when: User asks about top/best/worst performing stocks, gainers, losers, trending stocks
+   - Examples: "Top performing stocks today", "Best gainers this week", "Biggest losers", "Most active stocks"
+   - Data: Fetches real-time market movers from stock exchange (top 10 gainers/losers)
+
+3. **NEWS** - For financial news and updates
+   - Use when: User asks about news, updates, or events about stocks/market
+   - Examples: "Latest news about Apple", "What's happening with Tesla", "Any updates on Microsoft"
+   - Data: Fetches recent news articles and AI-analyzed summaries
+
+4. **COMMODITY_PRICE** - For commodity prices
+   - Use when: User asks about oil, gold, silver, natural gas prices
+   - Examples: "Current gold price", "What's oil trading at", "Silver price today"
+   - Data: Fetches real-time commodity prices
+
+5. **CRYPTO_PRICE** - For cryptocurrency prices
+   - Use when: User asks about Bitcoin, Ethereum, or any crypto
+   - Examples: "Bitcoin price", "How much is ETH", "Crypto prices"
+   - Data: Fetches real-time cryptocurrency prices
+
+6. **INDEX_PERFORMANCE** - For market indices
+   - Use when: User asks about S&P 500, NASDAQ, Dow Jones, or market indices
+   - Examples: "How is S&P 500 doing", "NASDAQ performance", "Dow Jones today"
+   - Data: Fetches index values and daily changes
+
+7. **FOREX** - For currency exchange rates
+   - Use when: User asks about currency conversion or exchange rates
+   - Examples: "USD to AED rate", "Exchange rate EUR to USD", "Currency conversion"
+   - Data: Fetches real-time forex rates
+
+8. **CURRENT_PRICE** - For specific stock's current price
+   - Use when: User asks about a specific stock's current trading price
+   - Examples: "Apple stock price", "How much is MSFT trading at", "AAPL price"
+   - Data: Fetches real-time quote for specific stock
+
+9. **GENERAL** - Fallback for other financial queries
+   - Use when: Query doesn't fit above categories but is financial
+   - Examples: Complex analysis questions, general market questions
+   - Data: Uses AI search for comprehensive answer
+
+**Query to classify:** {query}
+
+Respond with ONLY the category name. No explanation.
+
+Category:"""
+
         print(f"✅ InternetDataHandler initialized with QWEN H100 for all LLM tasks")
 
     def _rewrite_query(self, query: str, chat_history: List[Dict[str, str]]) -> str:
@@ -328,7 +397,60 @@ class InternetDataHandler:
         return None, None
 
     def _classify_query(self, query: str) -> str:
-        """Classify the type of internet query."""
+        """
+        Classify the type of internet query using LLM.
+        
+        Args:
+            query: The user's query to classify
+            
+        Returns:
+            Category string: HYPOTHETICAL_INVESTMENT, MARKET_MOVERS, NEWS, 
+                           COMMODITY_PRICE, CRYPTO_PRICE, INDEX_PERFORMANCE, 
+                           FOREX, CURRENT_PRICE, or GENERAL
+        """
+        import time
+        start_time = time.time()
+        
+        # Valid categories for validation
+        valid_categories = [
+            "HYPOTHETICAL_INVESTMENT", "MARKET_MOVERS", "NEWS",
+            "COMMODITY_PRICE", "CRYPTO_PRICE", "INDEX_PERFORMANCE",
+            "FOREX", "CURRENT_PRICE", "GENERAL"
+        ]
+        
+        try:
+            # Format the prompt
+            prompt = self.classify_prompt.format(query=query)
+            
+            # Call LLM
+            response = self.classify_llm.invoke(prompt)
+            
+            # Extract content from AIMessage
+            category = response.content.strip().upper() if hasattr(response, 'content') else str(response).strip().upper()
+            
+            # Clean up the response - remove any extra text
+            for valid_cat in valid_categories:
+                if valid_cat in category:
+                    category = valid_cat
+                    break
+            
+            # Validate category
+            if category not in valid_categories:
+                print(f"  ⚠️ LLM returned invalid category '{category}', defaulting to GENERAL")
+                category = "GENERAL"
+            
+            elapsed = (time.time() - start_time) * 1000
+            print(f"  🤖 LLM Query Classification: {category} ({elapsed:.1f}ms)")
+            
+            return category
+            
+        except Exception as e:
+            print(f"  ❌ LLM classification failed: {e}, using fallback")
+            # Fallback to simple keyword matching
+            return self._classify_query_fallback(query)
+
+    def _classify_query_fallback(self, query: str) -> str:
+        """Fallback keyword-based classification if LLM fails."""
         query_lower = query.lower()
 
         if any(phrase in query_lower for phrase in [
@@ -339,7 +461,8 @@ class InternetDataHandler:
 
         if any(phrase in query_lower for phrase in [
             "top gainers", "top losers", "biggest gainers", "biggest losers",
-            "most active", "trending stocks", "market movers"
+            "most active", "trending stocks", "market movers",
+            "top performing", "best performing", "worst performing"
         ]):
             return "MARKET_MOVERS"
 
@@ -492,6 +615,11 @@ If you had invested {currency_symbol}{amount:,.0f} in {symbol} on {actual_date},
 
         if not data:
             return f"I couldn't fetch market movers data. The market may be closed."
+
+        # Debug logging: show fetched data
+        print(f"  → Raw market movers data received: {len(data)} items")
+        for i, stock in enumerate(data[:5]):
+            print(f"     [{i+1}] {stock.get('symbol', 'N/A')}: {stock.get('changesPercentage', 0):.2f}%")
 
         data = data[:10]
 
@@ -771,6 +899,9 @@ If you had invested {currency_symbol}{amount:,.0f} in {symbol} on {actual_date},
 
             elapsed = time.time() - start_time
             print(f"✅ Completed: Internet Data Fetch in {elapsed:.2f}s")
+            print(f"  → Response length: {len(response)} chars")
+            # Log first 500 chars for debugging
+            print(f"  → Response preview: {response[:500]}..." if len(response) > 500 else f"  → Response: {response}")
 
             return response
 

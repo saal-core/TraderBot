@@ -25,39 +25,48 @@ LLM_ROUTER_PROMPT = """You are an expert query classifier for a financial portfo
 
 **Classification Rules:**
 
-1. **database** - Questions about the user's personal portfolio data:
+1. **database** - Questions about the user's personal portfolio data ONLY:
    - Portfolio holdings, positions, stocks, investments
    - Profit/loss, returns, PnL, gains
    - YTD/MTD/QTD performance
    - Portfolio attributes (description, benchmark, cost model)
    - Top/bottom performing stocks in their portfolio
-   - Any follow-up questions about previous database queries (e.g., "show more", "what about top 10", "give me details")
+   - Any follow-up questions about previous database queries
 
-2. **internet_data** - Questions requiring real-time external market data:
-   - Current stock prices (not from portfolio)
+2. **internet_data** - Questions requiring ONLY real-time external market data:
+   - Current stock prices (not asking about portfolio holdings)
    - Market news, trends, indices
    - Hypothetical investments ("if I had invested...")
    - Crypto, forex, commodity prices
    - Market movers on NASDAQ/NYSE
+   - Top gainers/losers in the market
 
-3. **comparison** - Questions comparing portfolio data WITH external benchmarks:
+3. **hybrid** - Questions that need BOTH portfolio data AND market data:
+   - "What are the top performing stocks today and how much do I have of each in my portfolio?"
+   - "Show me current prices of all stocks in my portfolio"
+   - "What's the market cap of my top holdings?"
+   - Queries asking for portfolio data enriched with live market data
+   - Queries asking for market data filtered by portfolio holdings
+
+4. **comparison** - Questions explicitly COMPARING portfolio performance WITH benchmarks:
    - "Compare my portfolio to S&P 500"
    - "How does my portfolio perform against the market?"
-   - Must have BOTH portfolio reference AND external benchmark reference
+   - "Am I beating the market?"
+   - "Is my portfolio outperforming NASDAQ?"
+   - Must have explicit comparison intent (vs, against, outperform, beat)
 
-4. **greeting** - Chitchat, greetings, small talk:
+5. **greeting** - Chitchat, greetings, small talk:
    - "Hi", "Hello", "How are you?"
    - "Who are you?", "What can you do?"
    - "Thank you", "Goodbye"
 
-**IMPORTANT - Follow-up Context:**
-- If the current query is a follow-up (like "show more", "what about X", "top 10 instead"), look at the conversation history to determine the category
-- If previous questions were about portfolio data, follow-ups should be "database"
-- If previous questions were about market data, follow-ups should be "internet_data"
+**IMPORTANT - Category Selection:**
+- If query needs portfolio data + live market data WITHOUT comparison intent → **hybrid**
+- If query explicitly compares performance → **comparison**
+- If query is ONLY about portfolio → **database**
+- If query is ONLY about market data → **internet_data**
 
-**When uncertain, prefer "database" if any portfolio-related words are present.**
-
-Respond with ONLY ONE of: database, internet_data, comparison, greeting
+Respond with ONLY ONE of: database, internet_data, hybrid, comparison, greeting
 
 Category:"""
 
@@ -157,7 +166,9 @@ class LLMQueryRouter:
             category = response.strip().lower()
             
             # Extract category from response
-            if "database" in category:
+            if "hybrid" in category:
+                result = "hybrid"
+            elif "database" in category:
                 result = "database"
             elif "internet" in category:
                 result = "internet_data"

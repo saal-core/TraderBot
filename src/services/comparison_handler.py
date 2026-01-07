@@ -1,6 +1,7 @@
 """
-Comparison Handler for orchestrating local database and internet data comparisons.
+Comparison and Hybrid Query Handler for orchestrating local database and internet data.
 Handles queries that require both local portfolio data and external market data.
+Supports both comparison queries AND general hybrid queries.
 """
 import time
 import json
@@ -13,7 +14,10 @@ from src.config.settings import get_qwen_config, get_openai_config
 from src.services.chat_memory import ChatMemory
 from src.services.database_handler import DatabaseQueryHandler
 from src.services.internet_data_handler import InternetDataHandler
-from src.config.prompts import COMPARISON_PLAN_PROMPT, COMPARISON_EXPLANATION_PROMPT, PARTIAL_COMPARISON_PROMPT 
+from src.config.prompts import (
+    COMPARISON_PLAN_PROMPT, COMPARISON_EXPLANATION_PROMPT, PARTIAL_COMPARISON_PROMPT,
+    HYBRID_PLAN_PROMPT, HYBRID_EXPLANATION_PROMPT
+)
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -110,6 +114,22 @@ class ComparisonHandler:
             template=PARTIAL_COMPARISON_PROMPT
         )
         self.partial_chain = self.partial_prompt | self.explanation_llm | StrOutputParser()
+
+        # Create hybrid query planning chain
+        self.hybrid_plan_prompt = PromptTemplate(
+            input_variables=["query"],
+            template=HYBRID_PLAN_PROMPT
+        )
+        self.hybrid_plan_chain = self.hybrid_plan_prompt | self.planning_llm | StrOutputParser()
+
+        # Create hybrid explanation chain
+        self.hybrid_explain_prompt = PromptTemplate(
+            input_variables=["query", "query_type", "database_data", "internet_data"],
+            template=HYBRID_EXPLANATION_PROMPT
+        )
+        self.hybrid_explain_chain = self.hybrid_explain_prompt | self.explanation_llm | StrOutputParser()
+
+        print("✅ ComparisonHandler initialized (supports comparison + hybrid queries)")
 
     def _plan_comparison(self, query: str) -> Dict[str, Any]:
         """
@@ -449,3 +469,226 @@ class ComparisonHandler:
     
         query_lower = query.lower()
         return any(re.search(pattern, query_lower) for pattern in comparison_indicators)
+
+    def is_hybrid_query(self, query: str) -> bool:
+        """
+        Detect if query needs BOTH portfolio data AND market data (without comparison intent).
+        """
+        query_lower = query.lower()
+        
+        # Portfolio/database indicators
+        portfolio_keywords = ['my portfolio', 'my holdings', 'my stocks', 'in my portfolio', 'i have', 'i own', 'my position']
+        has_portfolio = any(kw in query_lower for kw in portfolio_keywords)
+        
+        # Market/internet indicators
+        market_keywords = ['current price', 'market price', 'top gainers', 'top losers', 'market cap', 'today', 'current market', 'market movers']
+        has_market = any(kw in query_lower for kw in market_keywords)
+        
+        return has_portfolio and has_market
+
+    def _plan_hybrid(self, query: str) -> Dict[str, Any]:
+        """
+        Use LLM to plan a hybrid query - what to fetch from database AND internet.
+        
+        Args:
+            query: User's hybrid question
+            
+        Returns:
+            Dictionary with hybrid query plan
+        """
+        start_time = time.time()
+        print(f"⏱️  Starting: Hybrid Query Planning...")
+
+        try:
+            result = self.hybrid_plan_chain.invoke({"query": query})
+            
+            # Clean up the result - remove markdown code blocks if present
+            result = result.strip()
+            if result.startswith("```"):
+                lines = result.split("\n")
+                result = "\n".join([
+                    line for line in lines 
+                    if not line.startswith("```") and "json" not in line.lower()
+                ])
+                result = result.strip()
+
+            # Parse JSON
+            plan = json.loads(result)
+            
+            elapsed = time.time() - start_time
+            print(f"✅ Completed: Hybrid Query Planning in {elapsed:.2f}s")
+            print(f"  → Query Type: {plan.get('query_type', 'unknown')}")
+            print(f"  → Database Need: {plan.get('database_need', 'N/A')}")
+            print(f"  → Internet Need: {plan.get('internet_need', 'N/A')}")
+
+            return plan
+
+        except json.JSONDecodeError as e:
+            elapsed = time.time() - start_time
+            print(f"❌ Failed: JSON parsing error in hybrid planning after {elapsed:.2f}s - {e}")
+            # Return a default plan
+            return {
+                "query_type": "general_hybrid",
+                "database_need": "portfolio data",
+                "database_query_hint": query,
+                "internet_need": "market data",
+                "internet_query_hint": query,
+                "combine_strategy": "combine and present both data sources"
+            }
+        except Exception as e:
+            elapsed = time.time() - start_time
+            print(f"❌ Failed: Hybrid planning after {elapsed:.2f}s - Error: {e}")
+            return {
+                "query_type": "general_hybrid",
+                "database_need": "portfolio data",
+                "database_query_hint": query,
+                "internet_need": "market data", 
+                "internet_query_hint": query,
+                "combine_strategy": "combine and present both data sources"
+            }
+
+    def _generate_hybrid_response(
+        self,
+        query: str,
+        query_type: str,
+        database_data: Optional[str],
+        internet_data: Optional[str],
+        database_success: bool,
+        internet_success: bool
+    ) -> str:
+        """
+        Generate a combined response using both data sources.
+        """
+        start_time = time.time()
+        print(f"⏱️  Starting: Hybrid Response Generation...")
+
+        try:
+            if database_success and internet_success and database_data and internet_data:
+                # Full hybrid response
+                explanation = self.hybrid_explain_chain.invoke({
+                    "query": query,
+                    "query_type": query_type,
+                    "database_data": database_data,
+                    "internet_data": internet_data
+                })
+            else:
+                # Partial data available
+                available_parts = []
+                missing_parts = []
+
+                if database_success and database_data:
+                    available_parts.append(f"Portfolio Data:\n{database_data}")
+                else:
+                    missing_parts.append("Portfolio data (could not retrieve)")
+
+                if internet_success and internet_data:
+                    available_parts.append(f"Market Data:\n{internet_data}")
+                else:
+                    missing_parts.append("Market data (could not fetch)")
+
+                available_str = "\n\n".join(available_parts) if available_parts else "No data available"
+                missing_str = "\n".join(missing_parts) if missing_parts else "None"
+
+                explanation = self.partial_chain.invoke({
+                    "query": query,
+                    "available_data": available_str,
+                    "missing_data": missing_str
+                })
+
+            elapsed = time.time() - start_time
+            print(f"✅ Completed: Hybrid Response in {elapsed:.2f}s")
+
+            return explanation.strip()
+
+        except Exception as e:
+            elapsed = time.time() - start_time
+            print(f"❌ Failed: Hybrid Response after {elapsed:.2f}s - Error: {e}")
+            return f"I gathered data but encountered an error generating the response: {str(e)}"
+
+    def process_hybrid(
+        self, 
+        query: str, 
+        chat_history: List[Dict[str, str]] = None
+    ) -> Dict[str, Any]:
+        """
+        Process a hybrid query by fetching data from BOTH database AND internet.
+        
+        Args:
+            query: User's hybrid question
+            chat_history: Previous conversation history
+            
+        Returns:
+            Dictionary with combined results from both sources
+        """
+        if chat_history is None:
+            chat_history = []
+
+        print("\n" + "="*60)
+        print("🔀 HYBRID HANDLER - Processing Request")
+        print("="*60)
+
+        response = {
+            "content": "",
+            "sql_query": None,
+            "results_df": None,
+            "database_data": None,
+            "internet_data": None,
+            "hybrid_plan": None
+        }
+
+        try:
+            # Step 1: Plan the hybrid query
+            print("\n📋 Step 1: Planning Hybrid Query...")
+            plan = self._plan_hybrid(query)
+            response["hybrid_plan"] = plan
+
+            # Step 2: Fetch database data
+            print("\n💾 Step 2: Fetching Portfolio Data...")
+            database_success, database_data, results_df, sql_query = self._fetch_local_data(
+                plan.get("database_query_hint", query),
+                chat_history
+            )
+            response["database_data"] = database_data
+            response["results_df"] = results_df
+            response["sql_query"] = sql_query
+
+            # Step 3: Fetch internet data
+            print("\n🌐 Step 3: Fetching Market Data...")
+            internet_success, internet_data = self._fetch_external_data(
+                plan.get("internet_query_hint", query),
+                chat_history
+            )
+            response["internet_data"] = internet_data
+
+            # Step 4: Generate combined response
+            print("\n📝 Step 4: Generating Combined Response...")
+            explanation = self._generate_hybrid_response(
+                query=query,
+                query_type=plan.get("query_type", "general_hybrid"),
+                database_data=database_data,
+                internet_data=internet_data,
+                database_success=database_success,
+                internet_success=internet_success
+            )
+
+            response["content"] = explanation
+
+            # Add metadata about data sources
+            sources_used = []
+            if database_success and database_data:
+                sources_used.append("📊 Portfolio Database")
+            if internet_success and internet_data:
+                sources_used.append("🌐 Real-time Market Data")
+
+            if sources_used:
+                response["content"] += f"\n\n---\n*Data Sources: {', '.join(sources_used)}*"
+
+            print("\n" + "="*60)
+            print("✅ HYBRID HANDLER - Processing Complete")
+            print("="*60 + "\n")
+
+        except Exception as e:
+            print(f"\n❌ HYBRID HANDLER - Error: {e}")
+            response["content"] = f"❌ Error processing hybrid query: {str(e)}"
+
+        return response

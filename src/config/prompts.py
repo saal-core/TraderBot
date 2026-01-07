@@ -123,7 +123,7 @@ Interpret and explain the data **from the user's perspective**. Your job is to a
 9. **NO MARKDOWN for currency** - Do NOT use Latex formatting (like $...$) for currency. Write "$100" directly.
 10. **NO BOLD OR ITALIC** - Never use **bold** or *italic* markdown. Use plain text only. No asterisks around words.
 11. **Language** - Respond ENTIRELY in {language}. If Arabic, use the financial terminology below.
-12. No bold or italic srtyling in the response. Use plain text only.
+12. No Header or bold or italic srtyling in the response. Use plain text only.
 
 **Arabic Financial Glossary (use when responding in Arabic):**
 {arabic_glossary}
@@ -250,17 +250,30 @@ CLASSIFICATION_USER_PROMPT = """Here are the rules and examples to follow.
     - Returns Calculation
     - Current stock prices
     - Latest market news
+    - Top gainers/losers in the market
 
-3. **comparison**: For questions that COMPARE local portfolio data WITH external market data or benchmarks:
+3. **hybrid**: For questions that need BOTH local portfolio/database data AND external internet/market data:
+    **Includes**
+    - "What are the top performing stocks today and how much do I have of each in my portfolio?"
+    - "Show me the current price of AAPL and my holdings in that stock"
+    - "What's the market cap of my top 5 holdings?"
+    - "Compare my holdings to today's market movers"
+    - "What are the current prices of all stocks in my portfolio?"
+    **Key indicators**: The query asks for BOTH:
+      - Portfolio/holdings/database information (my stocks, my holdings, portfolio)
+      - AND current market/internet data (current price, today's performance, market movers)
+    **This is different from 'comparison'** - hybrid queries combine data, comparison queries evaluate performance vs benchmarks.
+
+4. **comparison**: For questions that explicitly COMPARE portfolio performance WITH external benchmarks:
     **Includes**
     - "Compare my portfolio to S&P 500"
     - "How does my portfolio perform against the market?"
     - "Is my portfolio outperforming NASDAQ?"
     - "Compare my returns vs the benchmark"
-    - "How do my holdings compare to current market prices?"
-    **Key indicators**: words like "compare", "vs", "versus", "against", "benchmark", "outperform", "underperform" combined with portfolio references AND market/index references
+    - "Am I beating the market?"
+    **Key indicators**: words like "compare", "vs", "versus", "against", "benchmark", "outperform", "underperform", "beat" combined with portfolio references AND market/index references
 
-4. **other**: This category is for any query that has **NO specific financial data request**. Respond to these queries as a friendly bot appropriately.
+5. **other**: This category is for any query that has **NO specific financial data request**. Respond to these queries as a friendly bot appropriately.
     - **Includes:**
         - **Small Talk:** "Hi", "Tell me a joke", "How are you?"
         - **Identity:** "Who are you?", "Can you act as my financial advisor?"
@@ -271,8 +284,9 @@ CLASSIFICATION_USER_PROMPT = """Here are the rules and examples to follow.
 ---
 **TIE-BREAKER LOGIC (CRITICAL)**
 - If a query mixes conversation with a financial request, classify it by the financial request.
-- If a query mentions BOTH local portfolio data AND external market/benchmark data with comparison intent → **comparison**
-- **When uncertain, you MUST prefer `portfolio`** if the question mentions portfolio-related keywords without external benchmark.
+- If a query asks for portfolio data COMBINED with current market data → **hybrid**
+- If a query explicitly COMPARES portfolio performance to a benchmark → **comparison**
+- **When uncertain, you MUST prefer `portfolio`** if the question mentions portfolio-related keywords without external data needs.
 
 ---
 **EXAMPLES**
@@ -291,6 +305,15 @@ Category: comparison
 User: "How does my portfolio perform against the market?"
 Category: comparison
 
+User: "What are the top performing stocks today and how much do I have of each in my portfolio?"
+Category: hybrid
+
+User: "Show me the current prices of all stocks in my portfolio"
+Category: hybrid
+
+User: "What's the market cap of my top holdings?"
+Category: hybrid
+
 User: "Hi"
 Category: other
 
@@ -305,6 +328,9 @@ Category: portfolio
 
 User: "Is my portfolio outperforming NASDAQ this year?"
 Category: comparison
+
+User: "What are the top gainers today?"
+Category: general
 
 ---
 **YOUR TASK**
@@ -474,6 +500,63 @@ Return ONLY the JSON object."""
 
 
 # ============================================================================
+# HYBRID QUERY HANDLER PROMPTS
+# ============================================================================
+
+HYBRID_PLAN_PROMPT = """You are an expert at analyzing financial queries that require multiple data sources.
+Given a user's question, extract what data needs to be fetched from BOTH the local portfolio database AND external internet sources.
+
+User Question: {query}
+
+Analyze the question and respond with a JSON object containing:
+{{
+    "query_type": "holdings_with_prices" | "portfolio_with_market_data" | "stocks_with_portfolio" | "general_hybrid",
+    "database_need": "description of what data to query from the portfolio database",
+    "database_query_hint": "natural language query to send to database handler (e.g., 'show my holdings', 'list stocks in my portfolio')",
+    "internet_need": "description of what data to fetch from internet (current prices, market movers, etc.)",
+    "internet_query_hint": "natural language query to send to internet handler (e.g., 'top gainers today', 'current price of AAPL')",
+    "combine_strategy": "how to combine the data (e.g., 'match stocks from portfolio with market data', 'enrich holdings with prices')"
+}}
+
+Important:
+- database_query_hint should be a clear question for the portfolio database
+- internet_query_hint should be a clear question for market data
+- Be specific to get the right data from each source
+
+Respond with ONLY the JSON object, no additional text."""
+
+
+HYBRID_EXPLANATION_PROMPT = """You are an experienced financial analyst combining portfolio data with live market information.
+
+User's Original Question: {query}
+
+Query Type: {query_type}
+
+Portfolio/Database Data:
+{database_data}
+
+Market/Internet Data:
+{internet_data}
+
+Based on BOTH data sources, provide a clear, comprehensive answer that:
+1. Directly answers the user's question using data from both sources
+2. Clearly presents information from portfolio AND market data
+3. Highlights any interesting findings or patterns
+4. Uses specific numbers and values from the data
+5. If one dataset is missing or incomplete, still provide useful insights from available data
+6. No Header or bold or italic srtyling in the response. Use plain text only.
+
+Guidelines:
+- Be factual and precise
+- Use bullet points or sections for clarity
+- Combine data meaningfully (e.g., "AAPL in your portfolio at X shares, currently trading at $Y")
+- Respond in the same language as the user's question (English or Arabic)
+- Do not include citations or source references
+
+Combined Analysis:"""
+
+
+# ============================================================================
 # PERPLEXITY PROMPTS
 # ============================================================================
 
@@ -559,6 +642,7 @@ Guidelines:
 - If the data doesn't allow for exact comparison, explain why and provide the best possible analysis
 - Respond in the same language as the user's question (English or Arabic)
 - Do not include citations or source references in your explanation
+- No Header or bold or italic srtyling in the response. Use plain text only.
 
 Comparison Analysis:"""
 
