@@ -31,7 +31,7 @@ from src.services.task_executor import TaskExecutor
 from src.services.database_handler import DatabaseQueryHandler
 from src.services.greating_handler import GreetingHandler
 from src.services.internet_data_handler import InternetDataHandler
-from src.services.comparison_handler import ComparisonHandler
+# ComparisonHandler removed - comparison queries now handled by QueryPlanner + TaskExecutor
 from src.services.chat_memory import ChatMemory
 from src.utils.response_cleaner import clean_llm_response, clean_llm_chunk
 
@@ -57,13 +57,12 @@ class AppState:
         self.db_handler: Optional[DatabaseQueryHandler] = None
         self.greeting_handler: Optional[GreetingHandler] = None
         self.internet_data_handler: Optional[InternetDataHandler] = None
-        self.comparison_handler: Optional[ComparisonHandler] = None
+        # comparison_handler removed - now handled by planner/executor
         self.chat_memory: Optional[ChatMemory] = None
         self.query_stats = {
             "database": 0,
             "greeting": 0,
             "internet_data": 0,
-            "comparison": 0,
             "hybrid": 0
         }
 
@@ -72,7 +71,6 @@ class AppState:
             "database": 0,
             "greeting": 0,
             "internet_data": 0,
-            "comparison": 0,
             "hybrid": 0
         }
 
@@ -194,18 +192,10 @@ async def initialize():
         app_state.internet_data_handler = InternetDataHandler()
         app_state.chat_memory = ChatMemory(max_pairs=5)
         
-        app_state.comparison_handler = ComparisonHandler(
-            db_handler=app_state.db_handler,
-            internet_handler=app_state.internet_data_handler,
-            sql_executor=app_state.sql_executor,
-            use_openai=True
-        )
-
         app_state.planner = QueryPlanner()
         app_state.task_executor = TaskExecutor(
             db_handler=app_state.db_handler,
-            internet_handler=app_state.internet_data_handler,
-            comparison_handler=app_state.comparison_handler
+            internet_handler=app_state.internet_data_handler
         )
         
         app_state.initialized = True
@@ -428,43 +418,8 @@ async def process_greeting(request: QueryRequest):
         )
 
 
-@app.post("/query/comparison", response_model=QueryResponse)
-async def process_comparison_query(request: QueryRequest):
-    """Process a comparison query"""
-    if not app_state.initialized:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Service not initialized. Call /initialize first."
-        )
-    
-    try:
-        chat_history = convert_chat_history(request.chat_history)
-        
-        result = app_state.comparison_handler.process(
-            request.query, chat_history
-        )
-        
-        app_state.query_stats["comparison"] += 1
-        cleaned_content = clean_response_content(result.get("content", ""))
-        
-        return QueryResponse(
-            success=True,
-            content=cleaned_content,
-            sql_query=result.get("sql_query"),
-            results=dataframe_to_list(result.get("results_df")),
-            query_type="comparison",
-            comparison_plan=result.get("comparison_plan"),
-            local_data=result.get("local_data"),
-            external_data=result.get("external_data")
-        )
-        
-    except Exception as e:
-        return QueryResponse(
-            success=False,
-            content=f"Error processing comparison: {str(e)}",
-            query_type="comparison",
-            error=str(e)
-        )
+# /query/comparison endpoint removed - comparison queries now use /query/stream
+# which routes through QueryPlanner + TaskExecutor for unified handling
 
 
 @app.get("/schema", response_model=SchemaResponse)
@@ -543,7 +498,6 @@ async def get_stats():
         database=app_state.query_stats["database"],
         greeting=app_state.query_stats["greeting"],
         internet_data=app_state.query_stats["internet_data"],
-        comparison=app_state.query_stats["comparison"],
         hybrid=app_state.query_stats["hybrid"],
         total=total
     )

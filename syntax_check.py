@@ -5,7 +5,7 @@ import compileall
 files = [
     '/home/dev/Hussein/TraderBot/src/services/database_handler.py',
     '/home/dev/Hussein/TraderBot/api.py',
-    '/home/dev/Hussein/TraderBot/src/services/comparison_handler.py'
+    '/home/dev/Hussein/TraderBot/src/services/task_executor.py'
 ]
 
 for f in files:

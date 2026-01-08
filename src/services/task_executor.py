@@ -8,8 +8,9 @@ from typing import Dict, List, Any, AsyncGenerator
 
 from src.services.database_handler import DatabaseQueryHandler
 from src.services.internet_data_handler import InternetDataHandler
-from src.services.comparison_handler import ComparisonHandler
+from src.config.llm_provider import get_streaming_llm
 from src.utils.response_cleaner import clean_llm_response
+from src.utils.toon_formatter import dataframe_to_toon
 
 class TaskExecutor:
     """
@@ -19,12 +20,12 @@ class TaskExecutor:
     def __init__(
         self,
         db_handler: DatabaseQueryHandler,
-        internet_handler: InternetDataHandler,
-        comparison_handler: ComparisonHandler
+        internet_handler: InternetDataHandler
     ):
         self.db_handler = db_handler
         self.internet_handler = internet_handler
-        self.comparison_handler = comparison_handler
+        # LLM for analysis/explanation (higher temperature for natural text)
+        self.explanation_llm = get_streaming_llm(temperature=0.7)
         print("✅ Task Executor initialized")
 
     async def execute_plan_streaming(
@@ -128,38 +129,51 @@ class TaskExecutor:
                      print(f"✅ Step {step_id} Complete: Market data fetched.")
 
                 elif action == "analyze" or action == "compare":
-                     # yield self._format_event("status", {"message": f"Step {step_id}: Analying & Comparing..."})
-                     print(f"Step {step_id}: Analying & Comparing...")
+                     print(f"Step {step_id}: Analyzing & Comparing...")
                      
-                     # Prepare context for comparison handler
-                     # We'll construct a synthetic query that includes all context
-                     analysis_input = f"""
-                     Perform analysis based on:
-                     Description: {description}
-                     Context provided:
-                     {json.dumps(context, default=str)}
-                     """
+                     # Format context data for LLM analysis
+                     context_str = ""
+                     for ctx_step_id, result in context.items():
+                         context_str += f"\n--- Data from Step {ctx_step_id} ---\n"
+                         if isinstance(result, list) and result:
+                             # It's likely database rows - format as readable text
+                             try:
+                                 import pandas as pd
+                                 df = pd.DataFrame(result)
+                                 context_str += dataframe_to_toon(df, f"Step_{ctx_step_id}_Data")
+                             except:
+                                 context_str += str(result)
+                         else:
+                             context_str += str(result)
                      
-                     # We can reuse comparison handler's logic or just call LLM directly.
-                     # Using comparison handler's 'process_hybrid' logic might be best if we can fit it.
-                     # Or simpler: Just use a standard LLM call via specific prompt.
-                     # Let's use a simpler direct generation for now since we have the data.
-                     
-                     # Using direct LLM generation for the analysis step
-                     # We'll use the comparison handler's internal LLM for this if exposed, 
-                     # but since we want to stream, maybe better to use the explain method.
-                     
-                     # Construct a rich prompt with all data
-                     final_explanation_stream = self.comparison_handler.stream_analysis(
-                         query=description,
-                         context=context
-                     )
+                     # Build analysis prompt
+                     analysis_prompt = f"""You are a financial analyst.
+User Query: {query_hint or description}
+
+Available Data:
+{context_str}
+
+Analyze the data and answer the user's question directly. 
+Verify if the data supports the answer.
+If comparing, highlight key differences.
+
+**HTML FORMATTING (CRITICAL - MUST FOLLOW):**
+- Generate your response as HTML, NOT markdown
+- Use <p> tags for paragraphs
+- Use <ul> and <li> for bullet lists
+- Wrap currency amounts in: <span class="currency">$1,234.56</span>
+- Wrap percentages in: <span class="percent">+12.5%</span>
+- Wrap important values/names in: <span class="highlight">Name</span>
+- NEVER use markdown syntax (no **, *, #, -, $...$ latex)
+
+Analysis:"""
                      
                      yield self._format_event("content", f"📊 **Analysis (Step {step_id}):**\n")
                      
-                     async for chunk in final_explanation_stream:
-                         yield self._format_event("content", chunk)
-                         
+                     # Stream analysis using internal LLM
+                     async for chunk in self.explanation_llm.astream(analysis_prompt):
+                         yield self._format_event("content", chunk.content)
+                          
                      step_result = "Analysis completed"
                      context[step_id] = step_result
 
