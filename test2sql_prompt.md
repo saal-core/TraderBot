@@ -273,7 +273,34 @@ ORDER BY ytd_total_pnl DESC
 LIMIT 10;
 ```
 
-#### **G. Specific Logic Rules**
+#### **G. Cross-Table Queries (Follow-up Questions)**
+
+When a follow-up question references holdings from a previous query AND needs P&L data, you must JOIN tables:
+
+**"For concentrated positions (>X% of portfolio), what is their P&L status?"**
+```sql
+SELECT 
+    ph.symbol, 
+    ph.portfolio_name, 
+    ph.market_value,
+    pnl.ytd_total_pnl,
+    CASE WHEN pnl.ytd_total_pnl > 0 THEN 'Profitable' ELSE 'Losing' END AS pnl_status
+FROM ai_trading.portfolio_holdings ph
+JOIN ai_trading.portfolio_holdings_realized_pnl pnl 
+    ON ph.symbol = pnl.symbol AND ph.portfolio_name = pnl.portfolio_name
+JOIN (
+    SELECT portfolio_name, SUM(market_value) AS total_value
+    FROM ai_trading.portfolio_holdings
+    WHERE datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_holdings)
+    GROUP BY portfolio_name
+) AS portfolio_totals ON ph.portfolio_name = portfolio_totals.portfolio_name
+WHERE ph.datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_holdings)
+  AND pnl.datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_holdings_realized_pnl)
+  AND ph.market_value > (portfolio_totals.total_value * 0.5)
+ORDER BY pnl.ytd_total_pnl DESC;
+```
+
+#### **H. Specific Logic Rules**
 
 1. **Funds Available:** `(allocated_amount - utilized_amount)` = cash available for new investments
 2. **Active Portfolios:** Default to `WHERE is_active = 1` unless asked for inactive
@@ -281,6 +308,10 @@ LIMIT 10;
 4. **Utilization Percentage:** `(utilized_amount / allocated_amount * 100)` = % of investment utilized
 5. **Average Return:** Use `AVG(ytd_return)` when asked for "average return across portfolios"
 6. **Trend Over Time:** For historical trends, do NOT filter to max datetime; instead ORDER BY datetime ASC
+7. **P&L Column Locations:**
+   - `portfolio_holdings` has: `ytd_unrealized_pl` (singular, basic)
+   - `portfolio_holdings_realized_pnl` has: `ytd_total_pnl`, `ytd_realized_pnl`, `ytd_unrealized_pnl` (detailed P&L breakdown)
+   - **For any P&L questions, prefer `portfolio_holdings_realized_pnl`**
 
 ---
 
@@ -344,3 +375,4 @@ Generate a valid PostgreSQL query for the `ai_trading` schema to answer the user
 5. Do not hallucinate columns. Only use the ones listed above.
 6. If the question is conversational (e.g. "hello", "thanks"), return `SELECT 'Conversational response' as status;`
 7. Pay attention to naming and aliasing of columns and always use the same names in the query and aliasing.
+8. **For follow-up questions:** Look at `[Previous SQL Query: ...]` in the conversation history. Use the same WHERE conditions, JOINs, or subqueries to maintain context (e.g., if the previous query filtered for holdings >50% of portfolio, reuse that filter logic).

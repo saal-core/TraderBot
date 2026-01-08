@@ -85,7 +85,11 @@ class DatabaseQueryHandler:
         return prompt_content
 
     def _format_conversation_history(self, chat_history: List[Dict[str, str]]) -> str:
-        """Format conversation history for SQL generation context"""
+        """Format conversation history for SQL generation context.
+        
+        Includes SQL queries and results summaries from previous messages to give 
+        the LLM context about what data was previously queried and returned.
+        """
         if not chat_history:
             print("📝 Conversation history: Empty (first question)")
             return "No previous conversation (this is the first question)."
@@ -102,13 +106,67 @@ class DatabaseQueryHandler:
         for msg in recent_messages:
             role = msg.get("role", "").capitalize()
             content = msg.get("content", "")
+            sql_query = msg.get("sql_query", "")
+            results = msg.get("results")
 
             if len(content) > 200:
                 content = content[:200] + "..."
 
             formatted_lines.append(f"{role}: {content}")
+            
+            # Include SQL query if present (critical for follow-up questions!)
+            if sql_query and role.lower() == "assistant":
+                # Truncate very long SQL queries
+                if len(sql_query) > 500:
+                    sql_query = sql_query[:500] + "..."
+                formatted_lines.append(f"[Previous SQL Query: {sql_query}]")
+            
+            # Include results summary if present (critical for "those", "them" references!)
+            if results and role.lower() == "assistant":
+                results_summary = self._summarize_results(results)
+                if results_summary:
+                    formatted_lines.append(f"[Query Results: {results_summary}]")
 
         return "\n".join(formatted_lines)
+
+    def _summarize_results(self, results) -> str:
+        """Create a compact summary of query results for context.
+        
+        Extracts key identifiers (symbols, portfolio names) that can be referenced
+        in follow-up questions.
+        """
+        try:
+            if results is None:
+                return ""
+            
+            # Handle list of dicts (common format from API)
+            if isinstance(results, list) and len(results) > 0:
+                # Extract key columns for context
+                sample = results[0] if results else {}
+                keys = list(sample.keys()) if isinstance(sample, dict) else []
+                
+                summary_parts = []
+                summary_parts.append(f"{len(results)} rows")
+                
+                # Extract important identifiers
+                identifiers = []
+                for row in results[:10]:  # Limit to first 10 rows
+                    if isinstance(row, dict):
+                        # Look for symbol, portfolio_name, or other key identifiers
+                        for key in ['symbol', 'portfolio_name', 'account_id']:
+                            if key in row and row[key]:
+                                identifiers.append(str(row[key]))
+                
+                if identifiers:
+                    unique_ids = list(dict.fromkeys(identifiers))[:8]  # First 8 unique
+                    summary_parts.append(f"includes: {', '.join(unique_ids)}")
+                
+                return "; ".join(summary_parts)
+            
+            return ""
+        except Exception as e:
+            print(f"⚠️ Error summarizing results: {e}")
+            return ""
 
     def _get_all_symbols_dict(self) -> Dict[str, str]:
         """Fetch all symbols from database and return as dictionary"""

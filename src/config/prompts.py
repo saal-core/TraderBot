@@ -357,7 +357,11 @@ Category:"""
 
 QUERY_PLANNER_PROMPT = """You are an expert query planner for a financial portfolio application.
 
+**Conversation History:**
+{conversation_history}
+
 Given a user query, analyze what data sources and steps are needed to answer it.
+Use the conversation history to understand follow-up questions and references to previous data.
 
 **Available Data Sources:**
 1. **database** - User's portfolio data (holdings, returns, benchmarks, performance, profit/loss, YTD/MTD stats)
