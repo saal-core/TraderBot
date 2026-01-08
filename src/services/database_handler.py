@@ -1,12 +1,10 @@
 """
-Database Query Handler - Generates SQL and explains results using QWEN streaming
+Database Query Handler - Generates SQL and explains results using configurable LLM provider
 """
 from typing import Dict, List, Tuple, Optional, Generator
-from langchain_community.llms import Ollama
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from src.config.settings import get_ollama_config, get_openai_config, get_qwen_config
+from src.config.llm_provider import get_llm, get_streaming_llm, get_active_provider, get_provider_config
 from src.config.prompts import (
     DATABASE_EXPLANATION_PROMPT,
     STOCK_EXTRACTION_PROMPT,
@@ -34,8 +32,7 @@ class DatabaseQueryHandler:
         Initialize the database query handler
 
         Args:
-            model_name: Name of the model to use (defaults to config)
-            use_openai: Whether to use OpenAI for SQL generation (True) or Ollama (False)
+            model_name: Name of the model to use (defaults to provider config)
             sql_executor: Optional SQL executor for fetching dynamic data
             memory_max_pairs: Maximum number of Q&A pairs to remember for follow-up questions
         """
@@ -44,36 +41,18 @@ class DatabaseQueryHandler:
         self._portfolio_context_cache = None  # Cache for portfolio context
         self.chat_memory = ChatMemory(max_pairs=memory_max_pairs)
 
-        ollama_config = get_ollama_config()
-        self.model_name = model_name or ollama_config["model_name"]
-        self.base_url = ollama_config["base_url"]
-        self.temperature = ollama_config["temperature_sql"]
-
-        # CONFIG CHANGE: Using QWEN (H100) for SQL Generation for testing
-        qwen_config = get_qwen_config()
-        print(f"🚀 Switching SQL Generation to QWEN H100 (Testing Mode)")
+        # Get LLM from provider configuration  
+        provider = get_active_provider()
+        config = get_provider_config()
+        self.model_name = model_name or config["model_name"]
         
-        self.llm = ChatOpenAI(
-            model=qwen_config.get("model_name", "Qwen3-30B-A3B"),
-            base_url=qwen_config["base_url"],
-            api_key=qwen_config["api_key"],
-            temperature=0.1,  # Low temperature for SQL precision
-            top_p=qwen_config.get("top_p", 0.8),
-            max_retries=2,
-            extra_body=qwen_config.get("extra_body", {})
-        )
-
-        # Use QWEN (H100) for explanations - faster than local Ollama
-        self.explanation_llm = ChatOpenAI(
-            model=qwen_config.get("model_name", "Qwen3-30B-A3B"),
-            base_url=qwen_config["base_url"],
-            api_key=qwen_config["api_key"],
-            temperature=qwen_config.get("temperature", 0.7),
-            top_p=qwen_config.get("top_p", 0.8),
-            max_retries=2,
-            streaming=True,  # Enable streaming
-            extra_body=qwen_config.get("extra_body", {})
-        )
+        print(f"🚀 SQL Generation using {provider.upper()}: {self.model_name}")
+        
+        # LLM for SQL generation (low temperature for precision)
+        self.llm = get_llm(temperature=0.1)
+        
+        # LLM for explanations (streaming, higher temperature)
+        self.explanation_llm = get_streaming_llm(temperature=0.7)
 
         # Load custom prompt template
         self.custom_prompt_template = self._load_custom_prompt()
@@ -365,7 +344,7 @@ class DatabaseQueryHandler:
 
         try:
             start_time = time.time()
-            print(f"⏱️  [QWEN H100] Starting: Results Explanation Generation...")
+            print(f"⏱️  Starting: Results Explanation Generation...")
 
             today_date = datetime.now().strftime("%A, %B %d, %Y")
             
@@ -424,7 +403,7 @@ class DatabaseQueryHandler:
         explain_chain = explain_prompt | self.explanation_llm | StrOutputParser()
 
         try:
-            print(f"⏱️  [QWEN H100] Starting: Streaming Results Explanation ({language})...")
+            print(f"⏱️  Starting: Streaming Results Explanation ({language})...")
 
             # Get today's date for context
             today_date = datetime.now().strftime("%A, %B %d, %Y")
@@ -446,7 +425,7 @@ class DatabaseQueryHandler:
                     first_token_received = True
                 yield chunk
 
-            print(f"✅ [QWEN H100] Completed: Streaming Explanation")
+            print(f"✅ Completed: Streaming Explanation")
         except Exception as e:
             print(f"❌ Error streaming explanation: {e}")
             yield "I found the results but had trouble explaining them."

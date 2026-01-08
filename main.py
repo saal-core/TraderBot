@@ -269,7 +269,7 @@ def process_non_streaming_query(question: str):
             "database": "/query/database",
             "greeting": "/query/greeting",
             "internet_data": "/query/internet",
-            "comparison": "/query/comparison"
+            "hybrid": "/query/stream"  # hybrid goes through unified stream
         }
         
         endpoint = endpoint_map.get(query_type, "/query/database")
@@ -350,7 +350,7 @@ with st.sidebar:
                     st.metric("Internet", stats.get("internet_data", 0))
                 with col2:
                     st.metric("Greeting", stats.get("greeting", 0))
-                    st.metric("Comparison", stats.get("comparison", 0))
+                    st.metric("Hybrid", stats.get("hybrid", 0))
                 st.metric("Total", stats.get("total", 0))
         except:
             pass

@@ -1,5 +1,5 @@
 """
-Internet Data Handler - Fetches real-time financial data and explains using QWEN streaming
+Internet Data Handler - Fetches real-time financial data and explains using configurable LLM provider
 """
 from typing import List, Dict, Optional, Tuple, Any, Generator
 from datetime import datetime, timedelta
@@ -7,14 +7,13 @@ import re
 import time
 import os
 
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 from src.services.fmp_service import FMPService
 from src.services.perplexity_service import PerplexityService
 from src.services.chat_memory import ChatMemory
-from src.config.settings import get_qwen_config
+from src.config.llm_provider import get_llm, get_streaming_llm, get_active_provider, get_provider_config
 from src.config.prompts import (
     INTERNET_DATA_EXPLANATION_PROMPT,
     STANDALONE_QUESTION_USER_PROMPT,
@@ -29,7 +28,7 @@ load_dotenv()
 class InternetDataHandler:
     """
     Handles internet-based financial data fetching using FMP API.
-    Uses QWEN H100 for streaming explanations.
+    Uses configurable LLM provider for streaming explanations.
     """
 
     def __init__(self, memory_max_pairs: int = 5):
@@ -43,18 +42,13 @@ class InternetDataHandler:
         self.perplexity = PerplexityService()
         self.chat_memory = ChatMemory(max_pairs=memory_max_pairs)
 
-        # Use QWEN H100 for explanations (streaming enabled)
-        qwen_config = get_qwen_config()
-        self.explanation_llm = ChatOpenAI(
-            model=qwen_config.get("model_name", "Qwen3-30B-A3B"),
-            base_url=qwen_config["base_url"],
-            api_key=qwen_config["api_key"],
-            temperature=qwen_config.get("temperature", 0.7),
-            top_p=qwen_config.get("top_p", 0.8),
-            streaming=True,
-            extra_body=qwen_config.get("extra_body", {})
-        )
-        self.llm_type = "QWEN H100"  # For logging purposes
+        # Get LLM from provider configuration
+        provider = get_active_provider()
+        config = get_provider_config()
+        
+        # LLM for explanations (streaming, higher temperature)
+        self.explanation_llm = get_streaming_llm(temperature=0.7)
+        self.llm_type = f"{provider.upper()}"  # For logging purposes
 
         # Explanation prompt with language and glossary placeholders
         self.explain_prompt = PromptTemplate(
@@ -76,29 +70,11 @@ class InternetDataHandler:
             "berkshire": "BRK-B",
         }
         
-        # Initialize QWEN H100 for query rewriting (fast, OpenAI-compatible)
-        self.rewrite_llm = ChatOpenAI(
-            model=qwen_config.get("model_name", "Qwen3-30B-A3B"),
-            base_url=qwen_config["base_url"],
-            api_key=qwen_config["api_key"],
-            temperature=0.1,  # Low for accurate rewriting
-            top_p=qwen_config.get("top_p", 0.8),
-            max_tokens=100,  # Short response expected
-            max_retries=2,
-            extra_body=qwen_config.get("extra_body", {})
-        )
+        # LLM for query rewriting (low temperature for accuracy)
+        self.rewrite_llm = get_llm(temperature=0.1, max_tokens=100)
 
-        # Initialize QWEN H100 for query classification (fast, low temp)
-        self.classify_llm = ChatOpenAI(
-            model=qwen_config.get("model_name", "Qwen3-30B-A3B"),
-            base_url=qwen_config["base_url"],
-            api_key=qwen_config["api_key"],
-            temperature=0.1,  # Very low for consistent classification
-            top_p=qwen_config.get("top_p", 0.8),
-            max_tokens=30,  # Only need category name
-            max_retries=2,
-            extra_body=qwen_config.get("extra_body", {})
-        )
+        # LLM for query classification (low temperature, short output)
+        self.classify_llm = get_llm(temperature=0.1, max_tokens=30)
 
         # Classification prompt template with explicit category descriptions
         self.classify_prompt = """You are a financial query classifier. Classify the following query into exactly ONE category.
@@ -156,7 +132,7 @@ Respond with ONLY the category name. No explanation.
 
 Category:"""
 
-        print(f"✅ InternetDataHandler initialized with QWEN H100 for all LLM tasks")
+        print(f"✅ InternetDataHandler initialized with {provider.upper()} for all LLM tasks")
 
     def _rewrite_query(self, query: str, chat_history: List[Dict[str, str]]) -> str:
         """
