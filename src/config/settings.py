@@ -40,7 +40,7 @@ def get_ollama_config() -> Dict[str, Any]:
         "model_name": os.getenv("OLLAMA_MODEL"),
         "base_url": os.getenv("OLLAMA_API_URL"),
         "temperature_routing": os.getenv("OLLAMA_TEMPERATURE_ROUTING", 0.1),
-        "temperature_sql": os.getenv("OLLAMA_TEMPERATURE_SQL", 0.2),
+        "temperature_sql": os.getenv("OLLAMA_TEMPERATURE_SQL", 0.0),
         "temperature_greeting": os.getenv("OLLAMA_TEMPERATURE_GREETING", 0.3),
         "temperature_comparison": os.getenv("OLLAMA_TEMPERATURE_COMPARISON", 0.3),
     }
