@@ -94,13 +94,13 @@ ALL_QUESTIONS = [
     "For the portfolio with the highest outperformance, what asset groups are driving the returns?",
     "Within the best performing asset group, which specific stocks have the highest total P&L?",
     "What percentage of that portfolio's net liquidity do those winning stocks represent?",
-    #----------------------------------------------------------------
     "What is the realized vs unrealized P&L breakdown for those top 5 holdings?",
-    "Which holdings represent more than 10% of any single portfolio's net liquidity?",
+    #----------------------------------------------------------------
+    "Which holdings represent more than 50% of any single portfolio's net liquidity?",
     "For those concentrated positions, what is their current P&L status (profitable or losing)?",
     "Are any of these concentrated positions in the same symbol across multiple portfolios?",
-    #----------------------------------------------------------------
     "For the most concentrated symbol across all portfolios, what is the total exposure and combined P&L?",
+    #----------------------------------------------------------------
     "Which portfolios have negative YTD returns while their benchmark is positive?",
     "For the worst underperforming portfolio, what is the P&L breakdown by asset group?",
     "Within the worst performing asset group, which specific holdings are dragging performance?",

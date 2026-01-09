@@ -128,6 +128,7 @@ def convert_messages_to_chat_history():
             "content": msg["content"],
             "timestamp": timestamp,
             "sql_query": msg.get("sql_query"),
+            "results": msg.get("results"),  # Include results data for context
             "query_type": msg.get("query_type")
         })
     return chat_history

@@ -35,7 +35,7 @@ class QueryPlanner:
         self.chat_memory = ChatMemory(max_pairs=memory_max_pairs)
         
         self.prompt = PromptTemplate(
-            input_variables=["query"],
+            input_variables=["query", "conversation_history"],
             template=QUERY_PLANNER_PROMPT
         )
         
@@ -44,6 +44,29 @@ class QueryPlanner:
         self.chain = self.prompt | self.llm | self.parser
         
         print(f"✅ Query Planner initialized with {provider.upper()}: {self.model_name}")
+
+    def _format_conversation_history(self, chat_history: List[Dict[str, str]]) -> str:
+        """Format conversation history for the planner prompt."""
+        if not chat_history:
+            return "No previous conversation."
+        
+        recent_messages = self.chat_memory.get_context_messages(chat_history)
+        
+        if not recent_messages:
+            return "No previous conversation."
+        
+        formatted_lines = []
+        for msg in recent_messages:
+            role = msg.get("role", "").capitalize()
+            content = msg.get("content", "")
+            
+            # Truncate long content
+            if len(content) > 200:
+                content = content[:200] + "..."
+            
+            formatted_lines.append(f"{role}: {content}")
+        
+        return "\n".join(formatted_lines)
 
     def generate_plan(self, query: str, chat_history: List[Dict[str, str]] = None) -> Dict[str, Any]:
         """
@@ -59,11 +82,17 @@ class QueryPlanner:
         start_time = time.time()
         print(f"🧠 Query Planner analyzing: {query}")
         
-        # Note: Currently we are passing just the query. 
-        # Future enhancement: Pass chat history to the planner prompt for context awareness.
+        # Format conversation history for context
+        conversation_text = self._format_conversation_history(chat_history or [])
+        
+        if chat_history:
+            print(f"   → With {len(chat_history)} history messages")
         
         try:
-            result = self.chain.invoke({"query": query})
+            result = self.chain.invoke({
+                "query": query,
+                "conversation_history": conversation_text
+            })
             elapsed = (time.time() - start_time) * 1000
             print(f"   → Plan generated ({elapsed:.1f}ms): {len(result.get('plan', []))} steps")
             return result
