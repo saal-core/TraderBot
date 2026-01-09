@@ -1,0 +1,10 @@
+streamlit
+vanna==0.7.9
+ollama
+pandas
+requests
+chromadb
+pydantic-settings
+psycopg2-binary
+langchain-openai
+openai

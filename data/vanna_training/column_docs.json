@@ -1,0 +1,212 @@
+[
+  {
+    "table_name": "portfolio_holdings",
+    "schema_name": "ai_trading",
+    "column_name": "datetime",
+    "documentation": "The exact timestamp of the data snapshot. Essential for historical analysis. Data Type: timestamp."
+  },
+  {
+    "table_name": "portfolio_holdings",
+    "schema_name": "ai_trading",
+    "column_name": "positions",
+    "documentation": "The number of shares held. Data Type: numeric."
+  },
+  {
+    "table_name": "portfolio_holdings",
+    "schema_name": "ai_trading",
+    "column_name": "market_value",
+    "documentation": "The total market value of the positions at that datetime. Data Type: numeric."
+  },
+  {
+    "table_name": "portfolio_holdings",
+    "schema_name": "ai_trading",
+    "column_name": "ytd_unrealized_pl",
+    "documentation": "Year-To-Date unrealized (on paper) profit or loss. Data Type: numeric."
+  },
+  {
+    "table_name": "portfolio_holdings",
+    "schema_name": "ai_trading",
+    "column_name": "created_timestamp",
+    "documentation": "Timestamp when the record was created. Data Type: timestamp."
+  },
+  {
+    "table_name": "portfolio_holdings",
+    "schema_name": "ai_trading",
+    "column_name": "updated_timestamp",
+    "documentation": "Timestamp when the record was last updated. Data Type: timestamp."
+  },
+  {
+    "table_name": "portfolio_holdings",
+    "schema_name": "ai_trading",
+    "column_name": "last_updated_time",
+    "documentation": "A more granular timestamp of the last modification. Data Type: timestamp."
+  },
+  {
+    "table_name": "portfolio_holdings_realized_pnl",
+    "schema_name": "ai_trading",
+    "column_name": "datetime",
+    "documentation": "The date for which the P&L data is recorded. Data Type: timestamp."
+  },
+  {
+    "table_name": "portfolio_holdings_realized_pnl",
+    "schema_name": "ai_trading",
+    "column_name": "portfolio_name",
+    "documentation": "The name of the investment portfolio. Data Type: character varying."
+  },
+  {
+    "table_name": "portfolio_holdings_realized_pnl",
+    "schema_name": "ai_trading",
+    "column_name": "symbol",
+    "documentation": "The stock ticker symbol. Data Type: character varying."
+  },
+  {
+    "table_name": "portfolio_holdings_realized_pnl",
+    "schema_name": "ai_trading",
+    "column_name": "positions",
+    "documentation": "Number of shares held. Data Type: numeric."
+  },
+  {
+    "table_name": "portfolio_holdings_realized_pnl",
+    "schema_name": "ai_trading",
+    "column_name": "market_value",
+    "documentation": "Total market value of the holding. Data Type: numeric."
+  },
+  {
+    "table_name": "portfolio_holdings_realized_pnl",
+    "schema_name": "ai_trading",
+    "column_name": "ytd_unrealized_pnl",
+    "documentation": "Year-To-Date unrealized (paper) profit or loss. Data Type: numeric."
+  },
+  {
+    "table_name": "portfolio_holdings_realized_pnl",
+    "schema_name": "ai_trading",
+    "column_name": "ytd_realized_pnl",
+    "documentation": "Year-To-Date realized (locked-in) profit or loss from sold positions. Data Type: numeric."
+  },
+  {
+    "table_name": "portfolio_holdings_realized_pnl",
+    "schema_name": "ai_trading",
+    "column_name": "ytd_total_pnl",
+    "documentation": "The sum of realized and unrealized P&L for the year. Best metric for overall profitability. Data Type: numeric."
+  },
+  {
+    "table_name": "portfolio_holdings_realized_pnl",
+    "schema_name": "ai_trading",
+    "column_name": "created_timestamp",
+    "documentation": "Timestamp when this record was created. Data Type: timestamp."
+  },
+  {
+    "table_name": "portfolio_holdings_realized_pnl",
+    "schema_name": "ai_trading",
+    "column_name": "daily_realized_pnl",
+    "documentation": "Profit or loss realized on this specific day. Data Type: numeric."
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "datetime",
+    "documentation": "The date for which the summary is calculated. Use MAX(datetime) to get the latest data. Data Type: timestamp."
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "portfolio_name",
+    "documentation": "The unique name of the investment portfolio. Data Type: character varying."
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "net_liquidity",
+    "documentation": "The total current value of the portfolio (cash + holdings). Data Type: numeric."
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "ytd_return",
+    "documentation": "The Year-To-Date return of the portfolio as a percentage. Data Type: numeric."
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "all_return",
+    "documentation": "The total return of the portfolio since its inception as a percentage. Data Type: numeric."
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "all_profit",
+    "documentation": "The total profit of the portfolio since its inception in absolute monetary terms. Data Type: numeric."
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "allocated_amount",
+    "documentation": "The total capital allocated to this portfolio. Data Type: numeric."
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "mtd_return",
+    "documentation": "The Month-To-Date return as a percentage. Data Type: numeric."
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "qtd_return",
+    "documentation": "The Quarter-To-Date return as a percentage. Data Type: numeric."
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "daily_return",
+    "documentation": "The daily return as a percentage. Data Type: numeric."
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "utilized_amount",
+    "documentation": "The amount of the allocated capital that is currently invested. \n    **Hint**: To find 'funds available for new investments' or 'unutilized capital', you must calculate the difference: (`allocated_amount` - `utilized_amount`).\n    Data Type: numeric."
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "group_name",
+    "documentation": "A category the portfolio belongs to (e.g., 'Balanced', 'Aggressive').\n    **Hint**: To compare performance across groups, you should GROUP BY this column and calculate aggregate metrics like AVG(ytd_return), SUM(ytd_profit), and COUNT(portfolio_name).\n    Data Type: character varying."
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "last_updated_time",
+    "documentation": "The precise timestamp of the last data update for the portfolio summary.\n    **CRITICAL**: This column is named `last_updated_time`. When asked for the 'last update' or 'latest update time', you MUST use this column. \n    Do NOT use `last_updated` or `updated_at` for this table.\n    Data Type: timestamp without time zone."
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "allocated_amount",
+    "documentation": "The total capital allocated to this portfolio. \n    **CRITICAL**: When asked for 'total investment amount' or 'total capital allocated', you MUST use this column. \n    The column name is `allocated_amount`. Do NOT use `total_capital_allocated`.\n    Data Type: numeric."
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "portfolio_description",
+    "documentation": "This column contains a text description of the portfolio's strategy.\n    **CRITICAL**: The column name is `portfolio_description`. \n    When asked for a portfolio's 'description' or 'strategy', you MUST use this column. \n    Do NOT use a column named `strategy`.\n    Data Type: character varying."
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "all_return",
+    "documentation": "The total return of the portfolio since its inception, as a percentage.\n    **CRITICAL**: This column is named `all_return`. When a user asks for 'total return', 'all-time return', or 'return since inception', you MUST use the `all_return` column.\n    Do NOT use a column named `total_return`.\n    Data Type: numeric."
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "portfolio_startdate",
+    "documentation": "The inception date of the portfolio (when it was created).\n    **CRITICAL**: This column is named `portfolio_startdate`. When asked about 'new portfolios', their 'inception date', or 'creation date', you MUST use this column.\n    Do NOT use a column named `inception_date`.\n    Data Type: date."
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "cost_model",
+    "documentation": "The cost basis accounting method used (e.g., 'FIFO').\n    **CRITICAL**: This column is named `cost_model`. When asked about the 'cost model', 'cost basis', or 'accounting method', you MUST use this column.\n    Do NOT use a column named `cost_basis_method`.\n    Data Type: character varying."
+  }
+]
