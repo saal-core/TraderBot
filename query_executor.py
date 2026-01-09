@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-Simple SQL Query Executor
-Executes SQL queries using the credentials from .env file
-"""
-
 import os
 import psycopg2
 from tabulate import tabulate
@@ -16,9 +10,18 @@ load_dotenv()
 # PUT YOUR SQL QUERY HERE
 # ============================================
 sql_query = """
-SELECT *
-FROM ai_trading.portfolio_holdings_realized_pnl phr
-LIMIT 10;
+SELECT ph.symbol, ph.portfolio_name, ph.ytd_total_pnl,
+       CASE WHEN ph.ytd_total_pnl > 0 THEN 'Profitable' ELSE 'Losing' END AS pl_status
+FROM ai_trading.portfolio_holdings ph
+JOIN (
+    SELECT portfolio_name, SUM(market_value) AS total_value
+    FROM ai_trading.portfolio_holdings
+    WHERE datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_holdings)
+    GROUP BY portfolio_name
+) p ON ph.portfolio_name = p.portfolio_name
+WHERE ph.datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_holdings)
+  AND ph.market_value > 0.1 * p.total_value
+ORDER BY ph.ytd_total_pnl DESC;
 """
 # ============================================
 

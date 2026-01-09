@@ -1,41 +1,37 @@
 
 from typing import Dict, List, Tuple, Optional
-from langchain_community.llms import Ollama
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from src.config.settings import get_ollama_config
+from src.config.llm_provider import get_llm, get_active_provider, get_provider_config
 from src.services.chat_memory import ChatMemory
 import os
 import time
 from rapidfuzz import fuzz, process
-from .query_router import QueryRouter
 from dotenv import load_dotenv
 load_dotenv()
 
 class GreetingHandler:
     """Handles greetings and chitchat with conversation memory"""
 
-    def __init__(self, model_name: str = None, ollama_base_url: str = None, memory_max_pairs: int = 5):
+    def __init__(self, model_name: str = None, base_url: str = None, memory_max_pairs: int = 5):
         """
         Initialize the greeting handler
 
         Args:
-            model_name: Name of the Ollama model to use (defaults to config)
-            ollama_base_url: Base URL for Ollama API (defaults to config)
+            model_name: Name of the model to use (defaults to provider config)
+            base_url: Base URL for LLM API (defaults to config)
             memory_max_pairs: Maximum number of Q&A pairs to remember (default: 5)
         """
-        ollama_config = get_ollama_config()
+        # Get LLM from provider configuration
+        provider = get_active_provider()
+        config = get_provider_config()
 
-        self.model_name = model_name or ollama_config["model_name"]
-        self.base_url = ollama_base_url or ollama_config["base_url"]
-        self.temperature = ollama_config["temperature_greeting"]
+        self.model_name = model_name or config["model_name"]
         self.chat_memory = ChatMemory(max_pairs=memory_max_pairs)
 
-        self.llm = Ollama(
-            model=self.model_name,
-            base_url=self.base_url,
-            temperature=self.temperature
-        )
+        self.llm = get_llm(temperature=0.3)
+        
+        print(f"✅ GreetingHandler initialized with {provider.upper()}: {self.model_name}")
 
         self.greeting_prompt = PromptTemplate(
             input_variables=["query", "chat_history"],

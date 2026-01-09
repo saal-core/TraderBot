@@ -1,5 +1,5 @@
 """
-Internet Data Handler - Fetches real-time financial data and explains using QWEN streaming
+Internet Data Handler - Fetches real-time financial data and explains using configurable LLM provider
 """
 from typing import List, Dict, Optional, Tuple, Any, Generator
 from datetime import datetime, timedelta
@@ -7,18 +7,15 @@ import re
 import time
 import os
 
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 from src.services.fmp_service import FMPService
 from src.services.perplexity_service import PerplexityService
 from src.services.chat_memory import ChatMemory
-from src.config.settings import get_qwen_config
+from src.config.llm_provider import get_llm, get_streaming_llm, get_active_provider, get_provider_config
 from src.config.prompts import (
-    INTERNET_DATA_EXPLANATION_PROMPT,
-    detect_language,
-    ARABIC_FINANCIAL_GLOSSARY
+    STANDALONE_QUESTION_USER_PROMPT,
 )
 
 from dotenv import load_dotenv
@@ -28,7 +25,7 @@ load_dotenv()
 class InternetDataHandler:
     """
     Handles internet-based financial data fetching using FMP API.
-    Uses QWEN H100 for streaming explanations.
+    Uses configurable LLM provider for streaming explanations.
     """
 
     def __init__(self, memory_max_pairs: int = 5):
@@ -42,22 +39,13 @@ class InternetDataHandler:
         self.perplexity = PerplexityService()
         self.chat_memory = ChatMemory(max_pairs=memory_max_pairs)
 
-        # Use QWEN H100 for explanations (streaming enabled)
-        qwen_config = get_qwen_config()
-        self.explanation_llm = ChatOpenAI(
-            model=qwen_config.get("model_name", "Qwen3-30B-A3B"),
-            base_url=qwen_config["base_url"],
-            api_key=qwen_config["api_key"],
-            temperature=qwen_config.get("temperature", 0.3),
-            streaming=True
-        )
-        self.llm_type = "QWEN H100"  # For logging purposes
-
-        # Explanation prompt with language and glossary placeholders
-        self.explain_prompt = PromptTemplate(
-            input_variables=["query", "data", "today_date", "language", "arabic_glossary"],
-            template=INTERNET_DATA_EXPLANATION_PROMPT
-        )
+        # Get LLM from provider configuration
+        provider = get_active_provider()
+        config = get_provider_config()
+        
+        # LLM for explanations (streaming, higher temperature)
+        self.explanation_llm = get_streaming_llm(temperature=0.7)
+        self.llm_type = f"{provider.upper()}"  # For logging purposes
 
         # Company to symbol mapping
         self.company_to_symbol = {
@@ -72,6 +60,150 @@ class InternetDataHandler:
             "mastercard": "MA", "jpmorgan": "JPM", "goldman": "GS",
             "berkshire": "BRK-B",
         }
+        
+        # LLM for query rewriting (low temperature for accuracy)
+        self.rewrite_llm = get_llm(temperature=0.1, max_tokens=100)
+
+        # LLM for query classification (low temperature, short output)
+        self.classify_llm = get_llm(temperature=0.1, max_tokens=30)
+
+        # Classification prompt template with explicit category descriptions
+        self.classify_prompt = """You are a financial query classifier. Classify the following query into exactly ONE category.
+
+**CATEGORIES AND THEIR USES:**
+
+1. **HYPOTHETICAL_INVESTMENT** - For "what if" investment scenarios
+   - Use when: User asks about hypothetical past investments
+   - Examples: "If I had invested $1000 in Tesla in 2020", "How much would $5000 in NVIDIA be worth today"
+   - Data: Fetches historical prices and calculates returns
+
+2. **MARKET_MOVERS** - For market performance rankings
+   - Use when: User asks about top/best/worst performing stocks, gainers, losers, trending stocks
+   - Examples: "Top performing stocks today", "Best gainers this week", "Biggest losers", "Most active stocks"
+   - Data: Fetches real-time market movers from stock exchange (top 10 gainers/losers)
+
+3. **NEWS** - For financial news and updates
+   - Use when: User asks about news, updates, or events about stocks/market
+   - Examples: "Latest news about Apple", "What's happening with Tesla", "Any updates on Microsoft"
+   - Data: Fetches recent news articles and AI-analyzed summaries
+
+4. **COMMODITY_PRICE** - For commodity prices
+   - Use when: User asks about oil, gold, silver, natural gas prices
+   - Examples: "Current gold price", "What's oil trading at", "Silver price today"
+   - Data: Fetches real-time commodity prices
+
+5. **CRYPTO_PRICE** - For cryptocurrency prices
+   - Use when: User asks about Bitcoin, Ethereum, or any crypto
+   - Examples: "Bitcoin price", "How much is ETH", "Crypto prices"
+   - Data: Fetches real-time cryptocurrency prices
+
+6. **INDEX_PERFORMANCE** - For market indices
+   - Use when: User asks about S&P 500, NASDAQ, Dow Jones, or market indices
+   - Examples: "How is S&P 500 doing", "NASDAQ performance", "Dow Jones today"
+   - Data: Fetches index values and daily changes
+
+7. **FOREX** - For currency exchange rates
+   - Use when: User asks about currency conversion or exchange rates
+   - Examples: "USD to AED rate", "Exchange rate EUR to USD", "Currency conversion"
+   - Data: Fetches real-time forex rates
+
+8. **CURRENT_PRICE** - For specific stock's current price
+   - Use when: User asks about a specific stock's current trading price
+   - Examples: "Apple stock price", "How much is MSFT trading at", "AAPL price"
+   - Data: Fetches real-time quote for specific stock
+
+9. **GENERAL** - Fallback for other financial queries
+   - Use when: Query doesn't fit above categories but is financial
+   - Examples: Complex analysis questions, general market questions
+   - Data: Uses AI search for comprehensive answer
+
+**Query to classify:** {query}
+
+Respond with ONLY the category name. No explanation.
+
+Category:"""
+
+        print(f"✅ InternetDataHandler initialized with {provider.upper()} for all LLM tasks")
+
+    def _rewrite_query(self, query: str, chat_history: List[Dict[str, str]]) -> str:
+        """
+        Rewrite a follow-up query into a standalone question using conversation history.
+        
+        Args:
+            query: The potentially incomplete follow-up query
+            chat_history: Previous conversation history
+            
+        Returns:
+            A complete, standalone question
+        """
+        if not chat_history:
+            return query
+        
+        # Format conversation history
+        recent_messages = self.chat_memory.get_context_messages(chat_history)
+        if not recent_messages:
+            return query
+        
+        # Check if query seems like a follow-up (short or lacking context)
+        query_lower = query.lower().strip()
+        followup_indicators = [
+            len(query.split()) <= 5,  # Short queries
+            query_lower.startswith("in "),
+            query_lower.startswith("for "),
+            query_lower.startswith("from "),
+            query_lower.startswith("what about"),
+            query_lower.startswith("show me"),
+            query_lower.startswith("give me"),
+            "more" in query_lower,
+            "also" in query_lower,
+            "instead" in query_lower,
+            "us market" in query_lower,
+            "nasdaq" in query_lower and len(query.split()) <= 4,
+            "nyse" in query_lower and len(query.split()) <= 4,
+        ]
+        
+        if not any(followup_indicators):
+            return query
+        
+        # Format history for prompt
+        history_lines = []
+        for msg in recent_messages[-4:]:  # Last 2 Q&A pairs
+            role = msg.get("role", "").capitalize()
+            content = msg.get("content", "")
+            # Truncate long content
+            if len(content) > 300:
+                content = content[:300] + "..."
+            history_lines.append(f"{role}: {content}")
+        
+        history_text = "\n".join(history_lines)
+        
+        try:
+            start_time = time.time()
+            print(f"🔄 Rewriting follow-up query with context...")
+            
+            prompt = STANDALONE_QUESTION_USER_PROMPT.format(
+                history=history_text,
+                question=query
+            )
+            
+            response = self.rewrite_llm.invoke(prompt)
+            # Handle AIMessage response from ChatOpenAI
+            rewritten = response.content.strip() if hasattr(response, 'content') else str(response).strip()
+            
+            # Clean up any prefixes the LLM might add
+            for prefix in ["Standalone Question:", "Question:", "Rewritten:"]:
+                if rewritten.startswith(prefix):
+                    rewritten = rewritten[len(prefix):].strip()
+            
+            elapsed = time.time() - start_time
+            print(f"   → Original: '{query}'")
+            print(f"   → Rewritten: '{rewritten}' ({elapsed:.2f}s)")
+            
+            return rewritten if rewritten else query
+            
+        except Exception as e:
+            print(f"   → Rewrite failed: {e}, using original query")
+            return query
 
     def _resolve_symbol(self, query: str) -> Optional[str]:
         """Extract and resolve stock symbol from query."""
@@ -232,7 +364,60 @@ class InternetDataHandler:
         return None, None
 
     def _classify_query(self, query: str) -> str:
-        """Classify the type of internet query."""
+        """
+        Classify the type of internet query using LLM.
+        
+        Args:
+            query: The user's query to classify
+            
+        Returns:
+            Category string: HYPOTHETICAL_INVESTMENT, MARKET_MOVERS, NEWS, 
+                           COMMODITY_PRICE, CRYPTO_PRICE, INDEX_PERFORMANCE, 
+                           FOREX, CURRENT_PRICE, or GENERAL
+        """
+        import time
+        start_time = time.time()
+        
+        # Valid categories for validation
+        valid_categories = [
+            "HYPOTHETICAL_INVESTMENT", "MARKET_MOVERS", "NEWS",
+            "COMMODITY_PRICE", "CRYPTO_PRICE", "INDEX_PERFORMANCE",
+            "FOREX", "CURRENT_PRICE", "GENERAL"
+        ]
+        
+        try:
+            # Format the prompt
+            prompt = self.classify_prompt.format(query=query)
+            
+            # Call LLM
+            response = self.classify_llm.invoke(prompt)
+            
+            # Extract content from AIMessage
+            category = response.content.strip().upper() if hasattr(response, 'content') else str(response).strip().upper()
+            
+            # Clean up the response - remove any extra text
+            for valid_cat in valid_categories:
+                if valid_cat in category:
+                    category = valid_cat
+                    break
+            
+            # Validate category
+            if category not in valid_categories:
+                print(f"  ⚠️ LLM returned invalid category '{category}', defaulting to GENERAL")
+                category = "GENERAL"
+            
+            elapsed = (time.time() - start_time) * 1000
+            print(f"  🤖 LLM Query Classification: {category} ({elapsed:.1f}ms)")
+            
+            return category
+            
+        except Exception as e:
+            print(f"  ❌ LLM classification failed: {e}, using fallback")
+            # Fallback to simple keyword matching
+            return self._classify_query_fallback(query)
+
+    def _classify_query_fallback(self, query: str) -> str:
+        """Fallback keyword-based classification if LLM fails."""
         query_lower = query.lower()
 
         if any(phrase in query_lower for phrase in [
@@ -243,7 +428,8 @@ class InternetDataHandler:
 
         if any(phrase in query_lower for phrase in [
             "top gainers", "top losers", "biggest gainers", "biggest losers",
-            "most active", "trending stocks", "market movers"
+            "most active", "trending stocks", "market movers",
+            "top performing", "best performing", "worst performing"
         ]):
             return "MARKET_MOVERS"
 
@@ -396,6 +582,11 @@ If you had invested {currency_symbol}{amount:,.0f} in {symbol} on {actual_date},
 
         if not data:
             return f"I couldn't fetch market movers data. The market may be closed."
+
+        # Debug logging: show fetched data
+        print(f"  → Raw market movers data received: {len(data)} items")
+        for i, stock in enumerate(data[:5]):
+            print(f"     [{i+1}] {stock.get('symbol', 'N/A')}: {stock.get('changesPercentage', 0):.2f}%")
 
         data = data[:10]
 
@@ -644,34 +835,40 @@ If you had invested {currency_symbol}{amount:,.0f} in {symbol} on {actual_date},
             start_time = time.time()
             print(f"⏱️  Starting: Internet Data Fetch...")
 
-            query_type = self._classify_query(user_query)
+            # Rewrite follow-up queries using conversation context
+            processed_query = self._rewrite_query(user_query, chat_history)
+
+            query_type = self._classify_query(processed_query)
             print(f"  → Query classified as: {query_type}")
 
             if query_type == "HYPOTHETICAL_INVESTMENT":
-                response = self._handle_hypothetical_investment(user_query)
+                response = self._handle_hypothetical_investment(processed_query)
             elif query_type == "MARKET_MOVERS":
-                response = self._handle_market_movers(user_query)
+                response = self._handle_market_movers(processed_query)
             elif query_type == "NEWS":
-                response = self._handle_news(user_query, chat_history)
+                response = self._handle_news(processed_query, chat_history)
             elif query_type == "COMMODITY_PRICE":
-                response = self._handle_commodity(user_query)
+                response = self._handle_commodity(processed_query)
             elif query_type == "CRYPTO_PRICE":
-                response = self._handle_crypto(user_query)
+                response = self._handle_crypto(processed_query)
             elif query_type == "INDEX_PERFORMANCE":
-                response = self._handle_index(user_query)
+                response = self._handle_index(processed_query)
             elif query_type == "FOREX":
-                response = self._handle_forex(user_query)
+                response = self._handle_forex(processed_query)
             elif query_type == "CURRENT_PRICE":
-                response = self._handle_current_price(user_query)
+                response = self._handle_current_price(processed_query)
             else:
-                symbol = self._resolve_symbol(user_query)
+                symbol = self._resolve_symbol(processed_query)
                 if symbol:
-                    response = self._handle_current_price(user_query)
+                    response = self._handle_current_price(processed_query)
                 else:
-                    response = self._handle_news(user_query)
+                    response = self._handle_news(processed_query)
 
             elapsed = time.time() - start_time
             print(f"✅ Completed: Internet Data Fetch in {elapsed:.2f}s")
+            print(f"  → Response length: {len(response)} chars")
+            # Log first 500 chars for debugging
+            print(f"  → Response preview: {response[:500]}..." if len(response) > 500 else f"  → Response: {response}")
 
             return response
 
@@ -702,7 +899,7 @@ If you had invested {currency_symbol}{amount:,.0f} in {symbol} on {actual_date},
 
     def explain_internet_data(self, query: str, raw_data: str) -> str:
         """
-        Generate explanation using QWEN (non-streaming).
+        Generate explanation using UnifiedResponseGenerator (non-streaming).
 
         Args:
             query: Original user question
@@ -711,32 +908,25 @@ If you had invested {currency_symbol}{amount:,.0f} in {symbol} on {actual_date},
         Returns:
             Natural language explanation
         """
+        from src.services.unified_response_generator import get_response_generator
+        
         try:
             start_time = time.time()
-            print(f"⏱️  [QWEN H100] Starting: Internet Data Explanation...")
-
-            today_date = datetime.now().strftime("%A, %B %d, %Y")
+            print(f"⏱️  Starting: Internet Data Explanation...")
             
-            # Detect language and prepare glossary
-            language = detect_language(query)
-            arabic_glossary = ARABIC_FINANCIAL_GLOSSARY if language == "Arabic" else "N/A"
-
-            formatted_prompt = self.explain_prompt.format(
+            generator = get_response_generator()
+            data = {"raw_data": raw_data}
+            
+            explanation = generator.generate_response(
                 query=query,
-                data=raw_data,
-                today_date=today_date,
-                language=language,
-                arabic_glossary=arabic_glossary
+                context_type="internet",
+                data=data
             )
 
-            explanation = self.explanation_llm.invoke(formatted_prompt)
-
             elapsed = time.time() - start_time
-            print(f"✅ [QWEN H100] Completed in {elapsed:.2f}s")
+            print(f"✅ Completed in {elapsed:.2f}s")
 
-            if hasattr(explanation, 'content'):
-                return explanation.content.strip()
-            return str(explanation).strip()
+            return explanation
 
         except Exception as e:
             print(f"❌ Error explaining internet data: {e}")
@@ -744,7 +934,7 @@ If you had invested {currency_symbol}{amount:,.0f} in {symbol} on {actual_date},
 
     def explain_internet_data_streaming(self, query: str, raw_data: str) -> Generator[Dict, None, None]:
         """
-        Generate explanation using QWEN with streaming.
+        Generate explanation using UnifiedResponseGenerator with streaming.
 
         Args:
             query: Original user question
@@ -758,39 +948,33 @@ If you had invested {currency_symbol}{amount:,.0f} in {symbol} on {actual_date},
                 "elapsed_time": float (only for metadata)
             }
         """
+        from src.services.unified_response_generator import get_response_generator
+        
         try:
             start_time = time.time()
-            print(f"⏱️  [QWEN H100] Starting: Internet Data Explanation (Streaming)...")
-
-            today_date = datetime.now().strftime("%A, %B %d, %Y")
+            print(f"⏱️  Starting: Internet Data Explanation (Streaming)...")
             
-            # Detect language and prepare glossary
-            language = detect_language(query)
-            arabic_glossary = ARABIC_FINANCIAL_GLOSSARY if language == "Arabic" else "N/A"
-
-            formatted_prompt = self.explain_prompt.format(
+            first_token_received = False
+            generator = get_response_generator()
+            data = {"raw_data": raw_data}
+            
+            for chunk in generator.stream_response(
                 query=query,
-                data=raw_data,
-                today_date=today_date,
-                language=language,
-                arabic_glossary=arabic_glossary
-            )
-
-            # Stream from QWEN
-            for chunk in self.explanation_llm.stream(formatted_prompt):
-                if hasattr(chunk, 'content') and chunk.content:
-                    yield {
-                        "type": "chunk",
-                        "content": chunk.content
-                    }
-                elif isinstance(chunk, str) and chunk:
-                    yield {
-                        "type": "chunk",
-                        "content": chunk
-                    }
+                context_type="internet",
+                data=data
+            ):
+                if not first_token_received:
+                    elapsed = time.time() - start_time
+                    print(f"⚡ First token received in {elapsed:.4f}s")
+                    first_token_received = True
+                    
+                yield {
+                    "type": "chunk",
+                    "content": chunk
+                }
 
             elapsed = time.time() - start_time
-            print(f"✅ [QWEN H100] Completed: Streaming in {elapsed:.2f}s")
+            print(f"✅ Completed: Streaming in {elapsed:.2f}s")
 
             yield {
                 "type": "metadata",
@@ -800,48 +984,7 @@ If you had invested {currency_symbol}{amount:,.0f} in {symbol} on {actual_date},
 
         except Exception as e:
             print(f"❌ Error explaining internet data: {e}")
-            # Fallback to returning the raw data if explanation fails
-            return raw_data
-
-    def stream_explain_internet_data(self, query: str, raw_data: str):
-        """
-        Stream a natural language explanation of internet data.
-
-        Args:
-            query: Original user question
-            raw_data: The raw data/response fetched from internet sources
-
-        Yields:
-            String chunks of the explanation
-        """
-        # Detect language and prepare glossary
-        language = detect_language(query)
-        arabic_glossary = ARABIC_FINANCIAL_GLOSSARY if language == "Arabic" else "N/A"
-        
-        explain_prompt = PromptTemplate(
-            input_variables=["query", "data", "today_date", "language", "arabic_glossary"],
-            template=INTERNET_DATA_EXPLANATION_PROMPT
-        )
-
-        explain_chain = explain_prompt | self.explanation_llm | StrOutputParser()
-
-        try:
-            print(f"⏱️  [{self.llm_type}] Starting: Streaming Internet Data Explanation ({language})...")
-
-            # Get today's date for context
-            today_date = datetime.now().strftime("%A, %B %d, %Y")
-
-            for chunk in explain_chain.stream({
-                "query": query,
-                "data": raw_data,
-                "today_date": today_date,
-                "language": language,
-                "arabic_glossary": arabic_glossary
-            }):
-                yield chunk
-
-            print(f"✅ [{self.llm_type}] Completed: Streaming Internet Data Explanation")
-        except Exception as e:
-            print(f"❌ Error streaming internet data explanation: {e}")
-            # Fallback to returning the raw data if streaming fails
-            yield raw_data
+            yield {
+                "type": "error",
+                "content": str(e)
+            }

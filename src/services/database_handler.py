@@ -1,21 +1,15 @@
 """
-Database Query Handler - Generates SQL and explains results using QWEN streaming
+Database Query Handler - Generates SQL and explains results using configurable LLM provider
 """
 from typing import Dict, List, Tuple, Optional, Generator
-from langchain_community.llms import Ollama
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from src.config.settings import get_ollama_config, get_openai_config, get_qwen_config
+from src.config.llm_provider import get_llm, get_streaming_llm, get_active_provider, get_provider_config
 from src.config.prompts import (
-    DATABASE_EXPLANATION_PROMPT,
     STOCK_EXTRACTION_PROMPT,
     SYMBOL_MATCHING_PROMPT,
-    detect_language,
-    ARABIC_FINANCIAL_GLOSSARY
 )
 from src.services.chat_memory import ChatMemory
-from src.services.portfolio_alias_resolver import PortfolioAliasResolver
 import os
 import time
 from datetime import datetime
@@ -30,164 +24,140 @@ from src.utils.toon_formatter import format_query_results, format_symbol_list
 class DatabaseQueryHandler:
     """Handles database-related queries by generating SQL using custom prompt"""
 
-    def __init__(self, model_name: str = None, use_openai: bool = True, sql_executor=None, memory_max_pairs: int = 5):
+    def __init__(self, model_name: str = None, sql_executor=None, memory_max_pairs: int = 5):
         """
         Initialize the database query handler
 
         Args:
-            model_name: Name of the model to use (defaults to config)
-            use_openai: Whether to use OpenAI for SQL generation (True) or Ollama (False)
+            model_name: Name of the model to use (defaults to provider config)
             sql_executor: Optional SQL executor for fetching dynamic data
             memory_max_pairs: Maximum number of Q&A pairs to remember for follow-up questions
         """
         self.sql_executor = sql_executor
         self._symbols_cache = None
+        self._portfolio_context_cache = None  # Cache for portfolio context
         self.chat_memory = ChatMemory(max_pairs=memory_max_pairs)
 
-        # Initialize SQL generation model (OpenAI or Ollama)
-        if use_openai:
-            openai_config = get_openai_config()
-            self.model_name = model_name or openai_config["model_name"]
-            self.temperature = openai_config["temperature_sql"]
-
-            self.llm = ChatOpenAI(
-                model=self.model_name,
-                temperature=self.temperature,
-                api_key=openai_config["api_key"]
-            )
-        else:
-            ollama_config = get_ollama_config()
-            self.model_name = model_name or ollama_config["model_name"]
-            self.base_url = ollama_config["base_url"]
-            self.temperature = ollama_config["temperature_sql"]
-
-            self.llm = Ollama(
-                model=self.model_name,
-                base_url=self.base_url,
-                temperature=self.temperature
-            )
-
-        # Use QWEN (H100) for explanations - faster than local Ollama
-        qwen_config = get_qwen_config()
-        self.explanation_llm = ChatOpenAI(
-            model=qwen_config.get("model_name", "Qwen3-30B-A3B"),
-            base_url=qwen_config["base_url"],
-            api_key=qwen_config["api_key"],
-            temperature=qwen_config.get("temperature", 0.3),
-            max_retries=2,
-            streaming=True  # Enable streaming
-        )
-
-        # Initialize alias resolver for privacy-preserving placeholder generation
-        self.alias_resolver = PortfolioAliasResolver(sql_executor=sql_executor)
+        # Get LLM from provider configuration  
+        provider = get_active_provider()
+        config = get_provider_config()
+        self.model_name = model_name or config["model_name"]
+        
+        print(f"🚀 SQL Generation using {provider.upper()}: {self.model_name}")
+        
+        # LLM for SQL generation (low temperature for precision)
+        self.llm = get_llm(temperature=0.1)
+        
+        # LLM for explanations (streaming, higher temperature)
+        self.explanation_llm = get_streaming_llm(temperature=0.7)
 
         # Load custom prompt template
         self.custom_prompt_template = self._load_custom_prompt()
 
-        # Create prompt template with dynamic data including conversation history
+        # Create prompt template with dynamic data including conversation history and portfolio context
         self.sql_prompt = PromptTemplate(
-            input_variables=["schema", "entity_placeholders", "query", "matched_symbols", "conversation_history"],
+            input_variables=["query", "matched_symbols", "conversation_history", "portfolio_context"],
             template=self.custom_prompt_template
         )
 
         self.sql_chain = self.sql_prompt | self.llm | StrOutputParser()
 
-        # Explanation prompt with language and glossary placeholders
-        self.explain_prompt = PromptTemplate(
-            input_variables=["query", "results", "sql_query", "today_date", "language", "arabic_glossary"],
-            template=DATABASE_EXPLANATION_PROMPT
-        )
-
     def _load_custom_prompt(self) -> str:
         """Load custom prompt from test2sql_prompt.md"""
-        prompt_file = "test2sql_prompt.md"
+        prompt_file = "/home/dev/Hussein/TraderBot/test2sql_prompt.md"
 
         if os.path.exists(prompt_file):
             with open(prompt_file, 'r', encoding='utf-8') as f:
                 prompt_content = f.read()
                 print("=" * 20 + "\nLoaded custom SQL prompt template.\n" + "=" * 20)
         else:
-            prompt_content = """You are a PostgreSQL SQL expert. Generate a SQL query based on the user's question and database schema."""
+            raise FileNotFoundError(f"Prompt file not found: {prompt_file}")
 
-        full_template = f"""{prompt_content}
-
----
-
-### **4. Conversation History (for follow-up questions)**
-
-{{conversation_history}}
-
-**Note:** If the current question refers to previous context (e.g., "show more", "what about top 10", "give me details"),
-use the conversation history to understand the full intent. Otherwise, treat as a standalone question.
-
----
-
-### **5. Database Schema**
-
-{{schema}}
-
----
-
-### **6. Entity Placeholders (Privacy-Preserving)**
-
-**IMPORTANT**: The user's query has been preprocessed. Portfolio names and account IDs are replaced with placeholders.
-Use these placeholders EXACTLY as shown in your SQL WHERE clauses.
-
-**Resolved Entities:**
-{{entity_placeholders}}
-
-**Matched Stock Symbols (if any):**
-{{matched_symbols}}
-
-**PLACEHOLDER USAGE RULES:**
-- ONLY use placeholders that are explicitly listed in "Resolved Entities" above
-- If "Resolved Entities" says "No specific portfolio or account mentioned", do NOT use any :PORTFOLIO_N or :ACCOUNT_N placeholders
-- When placeholders are provided: Use them directly in WHERE clauses: `WHERE portfolio_name = :PORTFOLIO_1`
-- Do NOT wrap placeholders in quotes: Use `:PORTFOLIO_1` not `':PORTFOLIO_1'`
-- Do NOT invent or create placeholders - only use what is provided above
-
----
-
-### **7. Output Instructions**
-
-- Use the placeholders provided above when filtering by portfolio or account
-- Generate ONLY a SELECT query
-- Do not use INSERT, UPDATE, DELETE, or any data modification statements
-- Return only the SQL query without any explanation or markdown
-- Use proper PostgreSQL syntax
-- Always use schema prefix: `ai_trading.table_name`
-
----
-
-### **User Question:**
-
-{{query}}
-
-### **SQL Query:**"""
-
-        return full_template
+        return prompt_content
 
     def _format_conversation_history(self, chat_history: List[Dict[str, str]]) -> str:
-        """Format conversation history for SQL generation context"""
+        """Format conversation history for SQL generation context.
+        
+        Includes SQL queries and results summaries from previous messages to give 
+        the LLM context about what data was previously queried and returned.
+        """
         if not chat_history:
+            print("📝 Conversation history: Empty (first question)")
             return "No previous conversation (this is the first question)."
 
         recent_messages = self.chat_memory.get_context_messages(chat_history)
 
         if not recent_messages:
+            print("📝 Conversation history: Empty after filtering")
             return "No previous conversation (this is the first question)."
+
+        print(f"📝 Conversation history: {len(recent_messages)} messages found")
 
         formatted_lines = []
         for msg in recent_messages:
             role = msg.get("role", "").capitalize()
             content = msg.get("content", "")
+            sql_query = msg.get("sql_query", "")
+            results = msg.get("results")
 
             if len(content) > 200:
                 content = content[:200] + "..."
 
             formatted_lines.append(f"{role}: {content}")
+            
+            # Include SQL query if present (critical for follow-up questions!)
+            if sql_query and role.lower() == "assistant":
+                # Truncate very long SQL queries
+                if len(sql_query) > 500:
+                    sql_query = sql_query[:500] + "..."
+                formatted_lines.append(f"[Previous SQL Query: {sql_query}]")
+            
+            # Include results summary if present (critical for "those", "them" references!)
+            if results and role.lower() == "assistant":
+                results_summary = self._summarize_results(results)
+                if results_summary:
+                    formatted_lines.append(f"[Query Results: {results_summary}]")
 
         return "\n".join(formatted_lines)
+
+    def _summarize_results(self, results) -> str:
+        """Create a compact summary of query results for context.
+        
+        Extracts key identifiers (symbols, portfolio names) that can be referenced
+        in follow-up questions.
+        """
+        try:
+            if results is None:
+                return ""
+            
+            # Handle list of dicts (common format from API)
+            if isinstance(results, list) and len(results) > 0:
+                # Extract key columns for context
+                sample = results[0] if results else {}
+                keys = list(sample.keys()) if isinstance(sample, dict) else []
+                
+                summary_parts = []
+                summary_parts.append(f"{len(results)} rows")
+                
+                # Extract important identifiers
+                identifiers = []
+                for row in results[:10]:  # Limit to first 10 rows
+                    if isinstance(row, dict):
+                        # Look for symbol, portfolio_name, or other key identifiers
+                        for key in ['symbol', 'portfolio_name', 'account_id']:
+                            if key in row and row[key]:
+                                identifiers.append(str(row[key]))
+                
+                if identifiers:
+                    unique_ids = list(dict.fromkeys(identifiers))[:8]  # First 8 unique
+                    summary_parts.append(f"includes: {', '.join(unique_ids)}")
+                
+                return "; ".join(summary_parts)
+            
+            return ""
+        except Exception as e:
+            print(f"⚠️ Error summarizing results: {e}")
+            return ""
 
     def _get_all_symbols_dict(self) -> Dict[str, str]:
         """Fetch all symbols from database and return as dictionary"""
@@ -213,6 +183,60 @@ Use these placeholders EXACTLY as shown in your SQL WHERE clauses.
         except Exception as e:
             print(f"Error fetching symbols: {e}")
             return {}
+
+    def _get_portfolio_context(self) -> str:
+        """
+        Fetch portfolio context (names, account IDs, indices) from database for SQL generation.
+        Returns formatted string with this context information.
+        """
+        if self._portfolio_context_cache is not None:
+            return self._portfolio_context_cache
+
+        if not self.sql_executor:
+            return "No portfolio context available."
+
+        try:
+            query = """
+            SELECT DISTINCT 
+                portfolio_name, 
+                account_id, 
+                default_index
+            FROM ai_trading.portfolio_summary
+            WHERE datetime = (SELECT MAX(datetime) FROM ai_trading.portfolio_summary WHERE is_active = 1)
+              AND is_active = 1
+            ORDER BY portfolio_name
+            """
+            success, df, _ = self.sql_executor.execute_query(query)
+            
+            if success and df is not None and not df.empty:
+                # Format portfolio names
+                portfolio_names = df['portfolio_name'].dropna().unique().tolist()
+                account_ids = df['account_id'].dropna().unique().tolist()
+                
+                # Format as a context string
+                context_parts = []
+                context_parts.append(f"**Available Portfolio Names:** {', '.join(portfolio_names)}")
+                context_parts.append(f"**Available Account IDs:** {', '.join(account_ids)}")
+                
+                # Add portfolio-index mapping
+                index_mapping = []
+                for _, row in df.iterrows():
+                    if row['portfolio_name'] and row['default_index']:
+                        index_mapping.append(f"  - {row['portfolio_name']}: {row['default_index']}")
+                
+                if index_mapping:
+                    context_parts.append("**Portfolio Default Indices:**\n" + "\n".join(index_mapping))
+                
+                context_str = "\n".join(context_parts)
+                self._portfolio_context_cache = context_str
+                print(f"📋 Loaded portfolio context: {len(portfolio_names)} portfolios, {len(account_ids)} accounts")
+                return context_str
+            
+            return "No portfolio context available."
+            
+        except Exception as e:
+            print(f"Error fetching portfolio context: {e}")
+            return "No portfolio context available."
 
     def _extract_stock_mentions(self, query: str) -> List[str]:
         """Extract potential stock mentions from query using LLM"""
@@ -298,39 +322,24 @@ Use these placeholders EXACTLY as shown in your SQL WHERE clauses.
         else:
             return f"No close matches found for: {', '.join(mentioned_terms)}"
 
-    def generate_sql(self, query: str, schema: str, chat_history: List[Dict[str, str]] = None) -> str:
+    def generate_sql(self, query: str, chat_history: List[Dict[str, str]] = None) -> str:
         """
         Generate SQL query from natural language question with fuzzy stock matching.
 
         Args:
             query: User's natural language question
-            schema: Database schema information
             chat_history: Previous conversation history for follow-up questions
 
         Returns:
-            Generated SQL query string with actual values substituted
+            Generated SQL query string
         """
         if chat_history is None:
             chat_history = []
 
-        # Phase 1: Resolve entities using local LLM (privacy-preserving)
-        print("🔒 Phase 1: Resolving portfolio/account references locally...")
-        entity_resolution = self.alias_resolver.resolve_entities(query)
-
-        rewritten_query = entity_resolution.rewritten_query
-        placeholder_map = entity_resolution.placeholder_map
-        entity_placeholders = entity_resolution.placeholder_info
-
-        if placeholder_map:
-            print(f"  → Placeholder map: {placeholder_map}")
-            print(f"  → Rewritten query: {rewritten_query}")
-        else:
-            print("  → No specific portfolio/account mentioned")
-
         conversation_text = self._format_conversation_history(chat_history)
 
         # Check for stock mentions
-        print("  → Checking for stock mentions...")
+        print("📊 Checking for stock mentions...")
         mentioned_terms = self._extract_stock_mentions(query)
 
         matched_symbols = "N/A"
@@ -340,16 +349,18 @@ Use these placeholders EXACTLY as shown in your SQL WHERE clauses.
             matched_symbols = self._fuzzy_match_symbols(mentioned_terms, symbols_dict)
             print(f"  → {matched_symbols}")
 
-        # Phase 2: Generate SQL with placeholders
+        # Get portfolio context for better SQL generation
+        portfolio_context = self._get_portfolio_context()
+
+        # Generate SQL
         start_time = time.time()
-        print(f"⏱️  Phase 2: SQL Query Generation...")
+        print(f"⏱️  SQL Query Generation...")
 
         sql = self.sql_chain.invoke({
-            "schema": schema,
-            "entity_placeholders": entity_placeholders,
             "matched_symbols": matched_symbols,
             "conversation_history": conversation_text,
-            "query": rewritten_query
+            "portfolio_context": portfolio_context,
+            "query": query
         })
 
         elapsed = time.time() - start_time
@@ -362,32 +373,14 @@ Use these placeholders EXACTLY as shown in your SQL WHERE clauses.
             sql = "\n".join([line for line in lines if not line.startswith("```") and "sql" not in line.lower()])
         sql = sql.strip()
 
-        print(f"  → Generated SQL (with placeholders): {sql}")
-
-        # Phase 3: Substitute placeholders with actual values
-        if placeholder_map:
-            print(f"🔓 Phase 3: Substituting placeholders...")
-            sql = self.alias_resolver.substitute_placeholders(sql, placeholder_map)
-            print(f"  → Final SQL: {sql}")
-
-        # Validate no unsubstituted placeholders remain
-        import re
-        remaining_placeholders = re.findall(r':(PORTFOLIO_\d+|ACCOUNT_\d+)', sql)
-        if remaining_placeholders:
-            print(f"⚠️  Warning: Unsubstituted placeholders: {remaining_placeholders}")
-            for placeholder in remaining_placeholders:
-                full_placeholder = f":{placeholder}"
-                if full_placeholder in placeholder_map:
-                    actual_value = placeholder_map[full_placeholder]
-                    sql = sql.replace(full_placeholder, f"'{actual_value}'")
-                else:
-                    return f"ERROR: Could not resolve portfolio/account reference."
+        print(f"  → Generated SQL: {sql}")
 
         return sql
 
     def explain_results(self, query: str, results_df, sql_query: str) -> str:
         """
         Generate a natural language explanation of query results (non-streaming).
+        Uses UnifiedResponseGenerator for consistent formatting.
 
         Args:
             query: Original user question
@@ -397,36 +390,30 @@ Use these placeholders EXACTLY as shown in your SQL WHERE clauses.
         Returns:
             Natural language explanation
         """
+        from src.services.unified_response_generator import get_response_generator
+        
         results_text = format_query_results(results_df) if results_df is not None and not results_df.empty else "No results found"
 
         try:
             start_time = time.time()
-            print(f"⏱️  [QWEN H100] Starting: Results Explanation Generation...")
-
-            today_date = datetime.now().strftime("%A, %B %d, %Y")
+            print(f"⏱️  Starting: Results Explanation Generation...")
             
-            # Detect language and prepare glossary
-            language = detect_language(query)
-            arabic_glossary = ARABIC_FINANCIAL_GLOSSARY if language == "Arabic" else "N/A"
-
-            formatted_prompt = self.explain_prompt.format(
+            generator = get_response_generator()
+            data = {
+                "sql_query": sql_query,
+                "results": results_text
+            }
+            
+            explanation = generator.generate_response(
                 query=query,
-                results=results_text,
-                sql_query=sql_query,
-                today_date=today_date,
-                language=language,
-                arabic_glossary=arabic_glossary
+                context_type="database",
+                data=data
             )
-
-            explanation = self.explanation_llm.invoke(formatted_prompt)
 
             elapsed = time.time() - start_time
             print(f"✅ Completed: Results Explanation in {elapsed:.2f}s")
 
-            # Handle AIMessage response
-            if hasattr(explanation, 'content'):
-                return explanation.content.strip()
-            return str(explanation).strip()
+            return explanation
 
         except Exception as e:
             print(f"❌ Error explaining results: {e}")
@@ -435,7 +422,7 @@ Use these placeholders EXACTLY as shown in your SQL WHERE clauses.
     def stream_explain_results(self, query: str, results_df, sql_query: str):
         """
         Stream a natural language explanation of query results.
-        Uses QWEN (H100) for faster explanations with streaming.
+        Uses UnifiedResponseGenerator for consistent formatting.
 
         Args:
             query: Original user question
@@ -445,37 +432,34 @@ Use these placeholders EXACTLY as shown in your SQL WHERE clauses.
         Yields:
             String chunks of the explanation
         """
+        from src.services.unified_response_generator import get_response_generator
+        
         # Use TOON format for token-efficient results representation
         results_text = format_query_results(results_df) if results_df is not None and not results_df.empty else "No results found"
 
-        # Detect language and prepare glossary
-        language = detect_language(query)
-        arabic_glossary = ARABIC_FINANCIAL_GLOSSARY if language == "Arabic" else "N/A"
-
-        explain_prompt = PromptTemplate(
-            input_variables=["query", "results", "sql_query", "today_date", "language", "arabic_glossary"],
-            template=DATABASE_EXPLANATION_PROMPT
-        )
-
-        explain_chain = explain_prompt | self.explanation_llm | StrOutputParser()
-
         try:
-            print(f"⏱️  [QWEN H100] Starting: Streaming Results Explanation ({language})...")
-
-            # Get today's date for context
-            today_date = datetime.now().strftime("%A, %B %d, %Y")
-
-            for chunk in explain_chain.stream({
-                "query": query,
-                "results": results_text,
+            print(f"⏱️  Starting: Streaming Results Explanation...")
+            start_time = time.time()
+            first_token_received = False
+            
+            generator = get_response_generator()
+            data = {
                 "sql_query": sql_query,
-                "today_date": today_date,
-                "language": language,
-                "arabic_glossary": arabic_glossary
-            }):
+                "results": results_text
+            }
+            
+            for chunk in generator.stream_response(
+                query=query,
+                context_type="database",
+                data=data
+            ):
+                if not first_token_received:
+                    elapsed = time.time() - start_time
+                    print(f"⚡ First token received in {elapsed:.4f}s")
+                    first_token_received = True
                 yield chunk
 
-            print(f"✅ [QWEN H100] Completed: Streaming Explanation")
+            print(f"✅ Completed: Streaming Explanation")
         except Exception as e:
             print(f"❌ Error streaming explanation: {e}")
             yield "I found the results but had trouble explaining them."

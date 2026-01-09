@@ -31,6 +31,10 @@ class QueryRequest(BaseModel):
 class ClassifyRequest(BaseModel):
     """Request for classifying a query"""
     query: str = Field(..., description="Query to classify")
+    chat_history: List[ChatMessage] = Field(
+        default_factory=list,
+        description="Previous chat messages for context"
+    )
 
 
 class ExportRequest(BaseModel):
@@ -98,5 +102,6 @@ class StatsResponse(BaseModel):
     database: int = Field(default=0, description="Database query count")
     greeting: int = Field(default=0, description="Greeting query count")
     internet_data: int = Field(default=0, description="Internet data query count")
-    comparison: int = Field(default=0, description="Comparison query count")
+    hybrid: int = Field(default=0, description="Hybrid query count")
     total: int = Field(default=0, description="Total query count")
+
