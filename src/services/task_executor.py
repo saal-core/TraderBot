@@ -131,7 +131,7 @@ class TaskExecutor:
                 elif action == "analyze" or action == "compare":
                      print(f"Step {step_id}: Analyzing & Comparing...")
                      
-                     # Format context data for LLM analysis
+                     # Format context data for unified response generator
                      context_str = ""
                      for ctx_step_id, result in context.items():
                          context_str += f"\n--- Data from Step {ctx_step_id} ---\n"
@@ -146,34 +146,22 @@ class TaskExecutor:
                          else:
                              context_str += str(result)
                      
-                     # Build analysis prompt
-                     analysis_prompt = f"""You are a financial analyst.
-User Query: {query_hint or description}
-
-Available Data:
-{context_str}
-
-Analyze the data and answer the user's question directly. 
-Verify if the data supports the answer.
-If comparing, highlight key differences.
-
-**HTML FORMATTING (CRITICAL - MUST FOLLOW):**
-- Generate your response as HTML, NOT markdown
-- Use <p> tags for paragraphs
-- Use <ul> and <li> for bullet lists
-- Wrap currency amounts in: <span class="currency">$1,234.56</span>
-- Wrap percentages in: <span class="percent">+12.5%</span>
-- Wrap important values/names in: <span class="highlight">Name</span>
-- NEVER use markdown syntax (no **, *, #, -, $...$ latex)
-
-Analysis:"""
+                     # Use unified response generator
+                     from src.services.unified_response_generator import get_response_generator
                      
-                     yield self._format_event("content", f"📊 **Analysis (Step {step_id}):**\n")
+                     generator = get_response_generator()
+                     data = {"context": context_str}
                      
-                     # Stream analysis using internal LLM
-                     async for chunk in self.explanation_llm.astream(analysis_prompt):
-                         yield self._format_event("content", chunk.content)
-                          
+                     yield self._format_event("content", "📊 **Analysis:**\n")
+                     
+                     # Stream analysis using unified generator
+                     for chunk in generator.stream_response(
+                         query=query_hint or description,
+                         context_type="hybrid",
+                         data=data
+                     ):
+                         yield self._format_event("content", chunk)
+                           
                      step_result = "Analysis completed"
                      context[step_id] = step_result
 

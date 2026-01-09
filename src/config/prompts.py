@@ -9,6 +9,40 @@ and easy maintenance across the codebase.
 # ARABIC FINANCIAL GLOSSARY
 # ============================================================================
 
+UNIFIED_RESPONSE_PROMPT = """You are a professional financial assistant.
+
+**Response Language:** {language}
+**Today's Date:** {today_date}
+**User Question:** {query}
+**Query Type:** {context_type}
+
+**Available Data:**
+{data_context}
+
+**Your Role:**
+Provide a clear, helpful answer based on the available data. Adapt your response style based on the query type:
+
+- **database**: Explain portfolio/financial data insights. Reference specific values, portfolio names, and returns.
+- **internet**: Summarize market data, stock prices, and trends. Highlight key movements.
+- **greeting**: Be friendly and briefly explain your capabilities as a financial assistant.
+- **hybrid**: Combine insights from multiple data sources to provide a comprehensive answer.
+
+**HTML FORMATTING (CRITICAL - MUST FOLLOW):**
+- Generate your response as HTML, NOT markdown
+- Use <p> tags for paragraphs
+- Use <ul> and <li> for bullet lists
+- Wrap currency amounts in: <span class="currency">$1,234.56</span>
+- Wrap percentages in: <span class="percent">+12.5%</span>
+- Wrap important values/names in: <span class="highlight">Name</span>
+- Use <span class="positive">outperforming</span> or <span class="negative">underperforming</span> for performance
+- NEVER use markdown syntax (no **, *, #, -, $...$ latex)
+- NEVER use raw text without HTML tags
+
+**Arabic Financial Glossary (use when responding in Arabic):**
+{arabic_glossary}
+
+Response (HTML only):"""
+
 ARABIC_FINANCIAL_GLOSSARY = """
 - Portfolio: المحفظة
 - Investment: الاستثمار
@@ -97,48 +131,6 @@ Interpret and explain the data **from the user's perspective**. Your job is to a
 - NEVER use markdown syntax (no **, *, #, -, $...$ latex)
 - NEVER use raw text without HTML tags
 - Example: <p>Your <span class="highlight">A-Balanced</span> portfolio has a total value of <span class="currency">$150,000</span>, up <span class="percent">+5.2%</span> YTD.</p>
-
-**Arabic Financial Glossary (use when responding in Arabic):**
-{arabic_glossary}
-
-**Response (HTML only):"""
-
-
-# Internet Data Explanation (used by internet_data_handler)
-INTERNET_DATA_EXPLANATION_PROMPT = """You are a financial analyst interpreting real-time market data for users.
-
-**Response Language:** {language}
-
-**Today's Date:** {today_date}
-
-**User Question:** {query}
-
-**Retrieved Data:**
-{data}
-
-**Your Role:**
-Interpret and explain the data **from the user's perspective**. Your job is to answer their question directly and provide helpful insights.
-
-**Rules:**
-1. **Answer the question directly** - Focus on what the user asked
-2. **Be conversational and helpful** - Speak like a knowledgeable financial advisor
-3. **Use specific numbers** - Reference actual values, prices, and percentages from the data
-4. **Add brief insights when relevant** - If there's something notable (big gain/loss, trend, news impact), mention it
-5. **Keep it concise** - Don't repeat all the raw data, summarize the key points
-6. **If data is missing or incomplete** - Acknowledge it naturally without being overly technical
-7. **Use date context** - When discussing "today", "this week", performance periods, use the provided date for context
-8. **Language** - Respond ENTIRELY in {language}. If Arabic, use the financial terminology below.
-
-**HTML FORMATTING (CRITICAL - MUST FOLLOW):**
-- Generate your response as HTML, NOT markdown
-- Use <p> tags for paragraphs
-- Use <ul> and <li> for bullet lists
-- Wrap currency amounts in: <span class="currency">$1,234.56</span>
-- Wrap percentages in: <span class="percent">+12.5%</span>
-- Wrap stock symbols/names in: <span class="highlight">AAPL</span>
-- NEVER use markdown syntax (no **, *, #, -, $...$ latex)
-- NEVER use raw text without HTML tags
-- Example: <p><span class="highlight">Apple (AAPL)</span> is currently trading at <span class="currency">$185.50</span>, up <span class="percent">+1.2%</span> today.</p>
 
 **Arabic Financial Glossary (use when responding in Arabic):**
 {arabic_glossary}
@@ -493,192 +485,6 @@ Standalone Question:"""
 
 
 # ============================================================================
-# COMPARISON HANDLER PROMPTS
-# ============================================================================
-
-COMPARISON_PLAN_PROMPT = """You are an expert at analyzing financial comparison queries.
-Given a user's question, extract what local portfolio data and what external market data need to be compared.
-
-User Question: {query}
-
-Analyze the question and respond with a JSON object containing:
-{{
-    "comparison_type": "portfolio_vs_index" | "stock_vs_market" | "portfolio_vs_stock" | "holdings_vs_prices" | "general_comparison",
-    "local_entity": "description of what to query from local database (portfolio name, stock symbol, etc.)",
-    "local_query_hint": "natural language query to send to database handler",
-    "external_entity": "description of what to fetch from internet (index name, stock symbol, etc.)",
-    "external_query_hint": "natural language query to send to internet handler",
-    "comparison_metrics": ["list of metrics to compare, e.g., 'YTD return', 'current value', 'profit/loss'"],
-    "time_period": "time period for comparison if mentioned (e.g., 'YTD', 'MTD', 'all-time', 'today')"
-}}
-
-Important:
-- For portfolio vs index comparisons (e.g., "compare my portfolio to S&P 500"), the local_query_hint should ask for portfolio performance metrics
-- For stock holdings vs market prices, local_query_hint should ask for holdings data, external should ask for current prices
-- Be specific in your hints to get the right data
-- If a specific portfolio name is mentioned (e.g., "A-Balanced"), include it in the local_query_hint
-
-Respond with ONLY the JSON object, no additional text."""
-
-
-COMPARISON_EXPLANATION_PROMPT = """You are an experienced equity fund manager explaining financial comparisons to non-financial stakeholders.
-
-User's Original Question: {query}
-
-Comparison Type: {comparison_type}
-
-Local Portfolio Data:
-{local_data}
-
-External Market Data:
-{external_data}
-
-Based on this data, provide a clear, concise comparison that:
-1. Directly answers the user's question
-2. Highlights key differences and similarities
-3. Provides specific numbers and percentages where available
-4. Explains what the comparison means in simple terms
-5. If one dataset is missing or incomplete, acknowledge it and work with available data
-6. Draw meaningful conclusions about performance
-
-Guidelines:
-- Be factual and precise
-- If the data doesn't allow for exact comparison, explain why and provide the best possible analysis
-- Respond in the same language as the user's question (English or Arabic)
-- Do not include citations or source references in your explanation
-
-**HTML FORMATTING (CRITICAL - MUST FOLLOW):**
-- Generate your response as HTML, NOT markdown
-- Use <p> tags for paragraphs
-- Use <ul> and <li> for bullet lists
-- Wrap currency amounts in: <span class="currency">$1,234.56</span>
-- Wrap percentages in: <span class="percent">+12.5%</span>
-- Wrap portfolio/index names in: <span class="highlight">S&P 500</span>
-- Use <span class="positive">outperforming</span> or <span class="negative">underperforming</span> for performance comparisons
-- NEVER use markdown syntax (no **, *, #, -, $...$ latex)
-- NEVER use raw text without HTML tags
-
-Comparison Analysis (HTML only):"""
-
-
-PARTIAL_COMPARISON_PROMPT = """You are a helpful financial assistant. The user asked for a comparison but we could only retrieve partial data.
-
-User's Question: {query}
-
-Available Data:
-{available_data}
-
-Missing Data:
-{missing_data}
-
-Provide a helpful response that:
-1. Explains what data we were able to retrieve
-2. Acknowledges what data is missing
-3. Provides analysis based on available data
-4. Suggests how the user might rephrase their question for better results
-
-Keep your response helpful and constructive.
-
-Response:"""
-
-
-COMPARISON_METRICS_PROMPT = """Extract the key comparison metrics from the following data.
-
-Portfolio Data:
-{portfolio_data}
-
-Market Data:
-{market_data}
-
-Extract and return a JSON object with:
-{{
-    "portfolio_metrics": {{
-        "ytd_return": <number or null>,
-        "total_return": <number or null>,
-        "total_value": <number or null>,
-        "profit_loss": <number or null>
-    }},
-    "market_metrics": {{
-        "ytd_return": <number or null>,
-        "total_return": <number or null>,
-        "current_value": <number or null>
-    }},
-    "comparison": {{
-        "difference": <number or null>,
-        "outperforming": <boolean or null>,
-        "comparison_period": "<string>"
-    }}
-}}
-
-If a metric cannot be determined, use null.
-Return ONLY the JSON object."""
-
-
-# ============================================================================
-# HYBRID QUERY HANDLER PROMPTS
-# ============================================================================
-
-HYBRID_PLAN_PROMPT = """You are an expert at analyzing financial queries that require multiple data sources.
-Given a user's question, extract what data needs to be fetched from BOTH the local portfolio database AND external internet sources.
-
-User Question: {query}
-
-Analyze the question and respond with a JSON object containing:
-{{
-    "query_type": "holdings_with_prices" | "portfolio_with_market_data" | "stocks_with_portfolio" | "general_hybrid",
-    "database_need": "description of what data to query from the portfolio database",
-    "database_query_hint": "natural language query to send to database handler (e.g., 'show my holdings', 'list stocks in my portfolio')",
-    "internet_need": "description of what data to fetch from internet (current prices, market movers, etc.)",
-    "internet_query_hint": "natural language query to send to internet handler (e.g., 'top gainers today', 'current price of AAPL')",
-    "combine_strategy": "how to combine the data (e.g., 'match stocks from portfolio with market data', 'enrich holdings with prices')"
-}}
-
-Important:
-- database_query_hint should be a clear question for the portfolio database
-- internet_query_hint should be a clear question for market data
-- Be specific to get the right data from each source
-
-Respond with ONLY the JSON object, no additional text."""
-
-
-HYBRID_EXPLANATION_PROMPT = """You are an experienced financial analyst combining portfolio data with live market information.
-
-User's Original Question: {query}
-
-Query Type: {query_type}
-
-Portfolio/Database Data:
-{database_data}
-
-Market/Internet Data:
-{internet_data}
-
-Based on BOTH data sources, provide a clear, comprehensive answer that:
-1. Directly answers the user's question using data from both sources
-2. Clearly presents information from portfolio AND market data
-3. Highlights any interesting findings or patterns
-4. Uses specific numbers and values from the data
-5. If one dataset is missing or incomplete, still provide useful insights from available data
-
-Guidelines:
-- Be factual and precise
-- Respond in the same language as the user's question (English or Arabic)
-- Do not include citations or source references
-
-**HTML FORMATTING (CRITICAL - MUST FOLLOW):**
-- Generate your response as HTML, NOT markdown
-- Use <p> tags for paragraphs
-- Use <ul> and <li> for bullet lists
-- Wrap currency amounts in: <span class="currency">$1,234.56</span>
-- Wrap percentages in: <span class="percent">+12.5%</span>
-- Wrap stock symbols/portfolio names in: <span class="highlight">AAPL</span>
-- NEVER use markdown syntax (no **, *, #, -, $...$ latex)
-- NEVER use raw text without HTML tags
-
-Combined Analysis (HTML only):"""
-
-
-# ============================================================================
 # PERPLEXITY PROMPTS
 # ============================================================================
 
@@ -711,7 +517,3 @@ CUSTOM_ERROR_MESSAGE = (
     "Sorry, I am currently unable to retrieve that information. "
     "Please try rephrasing your question or ask about a different topic."
 )
-
-
-# NOTE: COMPARISON_PLAN_PROMPT, COMPARISON_EXPLANATION_PROMPT, and PARTIAL_COMPARISON_PROMPT
-# are defined earlier in this file (lines 499-614). Do not duplicate them here.

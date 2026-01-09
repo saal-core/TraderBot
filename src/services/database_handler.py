@@ -6,11 +6,8 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from src.config.llm_provider import get_llm, get_streaming_llm, get_active_provider, get_provider_config
 from src.config.prompts import (
-    DATABASE_EXPLANATION_PROMPT,
     STOCK_EXTRACTION_PROMPT,
     SYMBOL_MATCHING_PROMPT,
-    detect_language,
-    ARABIC_FINANCIAL_GLOSSARY
 )
 from src.services.chat_memory import ChatMemory
 import os
@@ -64,12 +61,6 @@ class DatabaseQueryHandler:
         )
 
         self.sql_chain = self.sql_prompt | self.llm | StrOutputParser()
-
-        # Explanation prompt with language and glossary placeholders
-        self.explain_prompt = PromptTemplate(
-            input_variables=["query", "results", "sql_query", "today_date", "language", "arabic_glossary"],
-            template=DATABASE_EXPLANATION_PROMPT
-        )
 
     def _load_custom_prompt(self) -> str:
         """Load custom prompt from test2sql_prompt.md"""
@@ -389,6 +380,7 @@ class DatabaseQueryHandler:
     def explain_results(self, query: str, results_df, sql_query: str) -> str:
         """
         Generate a natural language explanation of query results (non-streaming).
+        Uses UnifiedResponseGenerator for consistent formatting.
 
         Args:
             query: Original user question
@@ -398,36 +390,30 @@ class DatabaseQueryHandler:
         Returns:
             Natural language explanation
         """
+        from src.services.unified_response_generator import get_response_generator
+        
         results_text = format_query_results(results_df) if results_df is not None and not results_df.empty else "No results found"
 
         try:
             start_time = time.time()
             print(f"⏱️  Starting: Results Explanation Generation...")
-
-            today_date = datetime.now().strftime("%A, %B %d, %Y")
             
-            # Detect language and prepare glossary
-            language = detect_language(query)
-            arabic_glossary = ARABIC_FINANCIAL_GLOSSARY if language == "Arabic" else "N/A"
-
-            formatted_prompt = self.explain_prompt.format(
+            generator = get_response_generator()
+            data = {
+                "sql_query": sql_query,
+                "results": results_text
+            }
+            
+            explanation = generator.generate_response(
                 query=query,
-                results=results_text,
-                sql_query=sql_query,
-                today_date=today_date,
-                language=language,
-                arabic_glossary=arabic_glossary
+                context_type="database",
+                data=data
             )
-
-            explanation = self.explanation_llm.invoke(formatted_prompt)
 
             elapsed = time.time() - start_time
             print(f"✅ Completed: Results Explanation in {elapsed:.2f}s")
 
-            # Handle AIMessage response
-            if hasattr(explanation, 'content'):
-                return explanation.content.strip()
-            return str(explanation).strip()
+            return explanation
 
         except Exception as e:
             print(f"❌ Error explaining results: {e}")
@@ -436,7 +422,7 @@ class DatabaseQueryHandler:
     def stream_explain_results(self, query: str, results_df, sql_query: str):
         """
         Stream a natural language explanation of query results.
-        Uses QWEN (H100) for faster explanations with streaming.
+        Uses UnifiedResponseGenerator for consistent formatting.
 
         Args:
             query: Original user question
@@ -446,37 +432,27 @@ class DatabaseQueryHandler:
         Yields:
             String chunks of the explanation
         """
+        from src.services.unified_response_generator import get_response_generator
+        
         # Use TOON format for token-efficient results representation
         results_text = format_query_results(results_df) if results_df is not None and not results_df.empty else "No results found"
 
-        # Detect language and prepare glossary
-        language = detect_language(query)
-        arabic_glossary = ARABIC_FINANCIAL_GLOSSARY if language == "Arabic" else "N/A"
-
-        explain_prompt = PromptTemplate(
-            input_variables=["query", "results", "sql_query", "today_date", "language", "arabic_glossary"],
-            template=DATABASE_EXPLANATION_PROMPT
-        )
-
-        explain_chain = explain_prompt | self.explanation_llm | StrOutputParser()
-
         try:
-            print(f"⏱️  Starting: Streaming Results Explanation ({language})...")
-
-            # Get today's date for context
-            today_date = datetime.now().strftime("%A, %B %d, %Y")
-            
+            print(f"⏱️  Starting: Streaming Results Explanation...")
             start_time = time.time()
             first_token_received = False
-
-            for chunk in explain_chain.stream({
-                "query": query,
-                "results": results_text,
+            
+            generator = get_response_generator()
+            data = {
                 "sql_query": sql_query,
-                "today_date": today_date,
-                "language": language,
-                "arabic_glossary": arabic_glossary
-            }):
+                "results": results_text
+            }
+            
+            for chunk in generator.stream_response(
+                query=query,
+                context_type="database",
+                data=data
+            ):
                 if not first_token_received:
                     elapsed = time.time() - start_time
                     print(f"⚡ First token received in {elapsed:.4f}s")
