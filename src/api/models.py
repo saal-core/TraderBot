@@ -102,6 +102,6 @@ class StatsResponse(BaseModel):
     database: int = Field(default=0, description="Database query count")
     greeting: int = Field(default=0, description="Greeting query count")
     internet_data: int = Field(default=0, description="Internet data query count")
-    comparison: int = Field(default=0, description="Comparison query count")
     hybrid: int = Field(default=0, description="Hybrid query count")
     total: int = Field(default=0, description="Total query count")
+

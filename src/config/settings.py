@@ -40,7 +40,7 @@ def get_ollama_config() -> Dict[str, Any]:
         "model_name": os.getenv("OLLAMA_MODEL"),
         "base_url": os.getenv("OLLAMA_API_URL"),
         "temperature_routing": os.getenv("OLLAMA_TEMPERATURE_ROUTING", 0.1),
-        "temperature_sql": os.getenv("OLLAMA_TEMPERATURE_SQL", 0.2),
+        "temperature_sql": os.getenv("OLLAMA_TEMPERATURE_SQL", 0.0),
         "temperature_greeting": os.getenv("OLLAMA_TEMPERATURE_GREETING", 0.3),
         "temperature_comparison": os.getenv("OLLAMA_TEMPERATURE_COMPARISON", 0.3),
     }
@@ -128,6 +128,25 @@ def get_qwen_config() -> Dict[str, Any]:
             "top_k": int(os.getenv("QWEN_TOP_K", "20")),
             "repetition_penalty": float(os.getenv("QWEN_REPETITION_PENALTY", "1.05")),
         }
+    }
+
+
+def get_huggingface_config() -> Dict[str, Any]:
+    """
+    Get HuggingFace configuration as a dictionary (OpenAI-compatible API)
+    
+    Uses standard ChatOpenAI with HuggingFace's v1 router.
+    
+    Returns:
+        Dictionary containing HuggingFace configuration
+    """
+    return {
+        "api_key": os.getenv("HUGGINGFACEHUB_API_TOKEN"),
+        "model_name": os.getenv("HUGGINGFACE_MODEL"),
+        "base_url": "https://router.huggingface.co/v1/", #os.getenv("HUGGINGFACE_BASE_URL", "https://router.huggingface.co/v1"),
+        "temperature": float(os.getenv("HUGGINGFACE_TEMPERATURE", "0.7")),
+        "max_tokens": int(os.getenv("HUGGINGFACE_MAX_TOKENS", "2048")),
+        "type": os.getenv("HUGGINGFACE_TYPE", "api"), # api or local
     }
 
 

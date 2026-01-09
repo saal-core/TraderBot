@@ -1,5 +1,5 @@
 """
-Internet Data Handler - Fetches real-time financial data and explains using QWEN streaming
+Internet Data Handler - Fetches real-time financial data and explains using configurable LLM provider
 """
 from typing import List, Dict, Optional, Tuple, Any, Generator
 from datetime import datetime, timedelta
@@ -7,19 +7,15 @@ import re
 import time
 import os
 
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 from src.services.fmp_service import FMPService
 from src.services.perplexity_service import PerplexityService
 from src.services.chat_memory import ChatMemory
-from src.config.settings import get_qwen_config
+from src.config.llm_provider import get_llm, get_streaming_llm, get_active_provider, get_provider_config
 from src.config.prompts import (
-    INTERNET_DATA_EXPLANATION_PROMPT,
     STANDALONE_QUESTION_USER_PROMPT,
-    detect_language,
-    ARABIC_FINANCIAL_GLOSSARY
 )
 
 from dotenv import load_dotenv
@@ -29,7 +25,7 @@ load_dotenv()
 class InternetDataHandler:
     """
     Handles internet-based financial data fetching using FMP API.
-    Uses QWEN H100 for streaming explanations.
+    Uses configurable LLM provider for streaming explanations.
     """
 
     def __init__(self, memory_max_pairs: int = 5):
@@ -43,24 +39,13 @@ class InternetDataHandler:
         self.perplexity = PerplexityService()
         self.chat_memory = ChatMemory(max_pairs=memory_max_pairs)
 
-        # Use QWEN H100 for explanations (streaming enabled)
-        qwen_config = get_qwen_config()
-        self.explanation_llm = ChatOpenAI(
-            model=qwen_config.get("model_name", "Qwen3-30B-A3B"),
-            base_url=qwen_config["base_url"],
-            api_key=qwen_config["api_key"],
-            temperature=qwen_config.get("temperature", 0.7),
-            top_p=qwen_config.get("top_p", 0.8),
-            streaming=True,
-            extra_body=qwen_config.get("extra_body", {})
-        )
-        self.llm_type = "QWEN H100"  # For logging purposes
-
-        # Explanation prompt with language and glossary placeholders
-        self.explain_prompt = PromptTemplate(
-            input_variables=["query", "data", "today_date", "language", "arabic_glossary"],
-            template=INTERNET_DATA_EXPLANATION_PROMPT
-        )
+        # Get LLM from provider configuration
+        provider = get_active_provider()
+        config = get_provider_config()
+        
+        # LLM for explanations (streaming, higher temperature)
+        self.explanation_llm = get_streaming_llm(temperature=0.7)
+        self.llm_type = f"{provider.upper()}"  # For logging purposes
 
         # Company to symbol mapping
         self.company_to_symbol = {
@@ -76,29 +61,11 @@ class InternetDataHandler:
             "berkshire": "BRK-B",
         }
         
-        # Initialize QWEN H100 for query rewriting (fast, OpenAI-compatible)
-        self.rewrite_llm = ChatOpenAI(
-            model=qwen_config.get("model_name", "Qwen3-30B-A3B"),
-            base_url=qwen_config["base_url"],
-            api_key=qwen_config["api_key"],
-            temperature=0.1,  # Low for accurate rewriting
-            top_p=qwen_config.get("top_p", 0.8),
-            max_tokens=100,  # Short response expected
-            max_retries=2,
-            extra_body=qwen_config.get("extra_body", {})
-        )
+        # LLM for query rewriting (low temperature for accuracy)
+        self.rewrite_llm = get_llm(temperature=0.1, max_tokens=100)
 
-        # Initialize QWEN H100 for query classification (fast, low temp)
-        self.classify_llm = ChatOpenAI(
-            model=qwen_config.get("model_name", "Qwen3-30B-A3B"),
-            base_url=qwen_config["base_url"],
-            api_key=qwen_config["api_key"],
-            temperature=0.1,  # Very low for consistent classification
-            top_p=qwen_config.get("top_p", 0.8),
-            max_tokens=30,  # Only need category name
-            max_retries=2,
-            extra_body=qwen_config.get("extra_body", {})
-        )
+        # LLM for query classification (low temperature, short output)
+        self.classify_llm = get_llm(temperature=0.1, max_tokens=30)
 
         # Classification prompt template with explicit category descriptions
         self.classify_prompt = """You are a financial query classifier. Classify the following query into exactly ONE category.
@@ -156,7 +123,7 @@ Respond with ONLY the category name. No explanation.
 
 Category:"""
 
-        print(f"✅ InternetDataHandler initialized with QWEN H100 for all LLM tasks")
+        print(f"✅ InternetDataHandler initialized with {provider.upper()} for all LLM tasks")
 
     def _rewrite_query(self, query: str, chat_history: List[Dict[str, str]]) -> str:
         """
@@ -932,7 +899,7 @@ If you had invested {currency_symbol}{amount:,.0f} in {symbol} on {actual_date},
 
     def explain_internet_data(self, query: str, raw_data: str) -> str:
         """
-        Generate explanation using QWEN (non-streaming).
+        Generate explanation using UnifiedResponseGenerator (non-streaming).
 
         Args:
             query: Original user question
@@ -941,32 +908,25 @@ If you had invested {currency_symbol}{amount:,.0f} in {symbol} on {actual_date},
         Returns:
             Natural language explanation
         """
+        from src.services.unified_response_generator import get_response_generator
+        
         try:
             start_time = time.time()
-            print(f"⏱️  [QWEN H100] Starting: Internet Data Explanation...")
-
-            today_date = datetime.now().strftime("%A, %B %d, %Y")
+            print(f"⏱️  Starting: Internet Data Explanation...")
             
-            # Detect language and prepare glossary
-            language = detect_language(query)
-            arabic_glossary = ARABIC_FINANCIAL_GLOSSARY if language == "Arabic" else "N/A"
-
-            formatted_prompt = self.explain_prompt.format(
+            generator = get_response_generator()
+            data = {"raw_data": raw_data}
+            
+            explanation = generator.generate_response(
                 query=query,
-                data=raw_data,
-                today_date=today_date,
-                language=language,
-                arabic_glossary=arabic_glossary
+                context_type="internet",
+                data=data
             )
 
-            explanation = self.explanation_llm.invoke(formatted_prompt)
-
             elapsed = time.time() - start_time
-            print(f"✅ [QWEN H100] Completed in {elapsed:.2f}s")
+            print(f"✅ Completed in {elapsed:.2f}s")
 
-            if hasattr(explanation, 'content'):
-                return explanation.content.strip()
-            return str(explanation).strip()
+            return explanation
 
         except Exception as e:
             print(f"❌ Error explaining internet data: {e}")
@@ -974,7 +934,7 @@ If you had invested {currency_symbol}{amount:,.0f} in {symbol} on {actual_date},
 
     def explain_internet_data_streaming(self, query: str, raw_data: str) -> Generator[Dict, None, None]:
         """
-        Generate explanation using QWEN with streaming.
+        Generate explanation using UnifiedResponseGenerator with streaming.
 
         Args:
             query: Original user question
@@ -988,47 +948,33 @@ If you had invested {currency_symbol}{amount:,.0f} in {symbol} on {actual_date},
                 "elapsed_time": float (only for metadata)
             }
         """
+        from src.services.unified_response_generator import get_response_generator
+        
         try:
             start_time = time.time()
-            print(f"⏱️  [QWEN H100] Starting: Internet Data Explanation (Streaming)...")
-
-            today_date = datetime.now().strftime("%A, %B %d, %Y")
+            print(f"⏱️  Starting: Internet Data Explanation (Streaming)...")
             
-            # Detect language and prepare glossary
-            language = detect_language(query)
-            arabic_glossary = ARABIC_FINANCIAL_GLOSSARY if language == "Arabic" else "N/A"
-
-            formatted_prompt = self.explain_prompt.format(
-                query=query,
-                data=raw_data,
-                today_date=today_date,
-                language=language,
-                arabic_glossary=arabic_glossary
-            )
-
-            # Stream from QWEN
-            stream_start_time = time.time()
             first_token_received = False
+            generator = get_response_generator()
+            data = {"raw_data": raw_data}
             
-            for chunk in self.explanation_llm.stream(formatted_prompt):
+            for chunk in generator.stream_response(
+                query=query,
+                context_type="internet",
+                data=data
+            ):
                 if not first_token_received:
-                    elapsed = time.time() - stream_start_time
+                    elapsed = time.time() - start_time
                     print(f"⚡ First token received in {elapsed:.4f}s")
                     first_token_received = True
                     
-                if hasattr(chunk, 'content') and chunk.content:
-                    yield {
-                        "type": "chunk",
-                        "content": chunk.content
-                    }
-                elif isinstance(chunk, str) and chunk:
-                    yield {
-                        "type": "chunk",
-                        "content": chunk
-                    }
+                yield {
+                    "type": "chunk",
+                    "content": chunk
+                }
 
             elapsed = time.time() - start_time
-            print(f"✅ [QWEN H100] Completed: Streaming in {elapsed:.2f}s")
+            print(f"✅ Completed: Streaming in {elapsed:.2f}s")
 
             yield {
                 "type": "metadata",
@@ -1038,55 +984,7 @@ If you had invested {currency_symbol}{amount:,.0f} in {symbol} on {actual_date},
 
         except Exception as e:
             print(f"❌ Error explaining internet data: {e}")
-            # Fallback to returning the raw data if explanation fails
-            return raw_data
-
-    def stream_explain_internet_data(self, query: str, raw_data: str):
-        """
-        Stream a natural language explanation of internet data.
-
-        Args:
-            query: Original user question
-            raw_data: The raw data/response fetched from internet sources
-
-        Yields:
-            String chunks of the explanation
-        """
-        # Detect language and prepare glossary
-        language = detect_language(query)
-        arabic_glossary = ARABIC_FINANCIAL_GLOSSARY if language == "Arabic" else "N/A"
-        
-        explain_prompt = PromptTemplate(
-            input_variables=["query", "data", "today_date", "language", "arabic_glossary"],
-            template=INTERNET_DATA_EXPLANATION_PROMPT
-        )
-
-        explain_chain = explain_prompt | self.explanation_llm | StrOutputParser()
-
-        try:
-            print(f"⏱️  [{self.llm_type}] Starting: Streaming Internet Data Explanation ({language})...")
-
-            # Get today's date for context
-            today_date = datetime.now().strftime("%A, %B %d, %Y")
-            
-            start_time = time.time()
-            first_token_received = False
-
-            for chunk in explain_chain.stream({
-                "query": query,
-                "data": raw_data,
-                "today_date": today_date,
-                "language": language,
-                "arabic_glossary": arabic_glossary
-            }):
-                if not first_token_received:
-                    elapsed = time.time() - start_time
-                    print(f"⚡ First token received in {elapsed:.4f}s")
-                    first_token_received = True
-                yield chunk
-
-            print(f"✅ [{self.llm_type}] Completed: Streaming Internet Data Explanation")
-        except Exception as e:
-            print(f"❌ Error streaming internet data explanation: {e}")
-            # Fallback to returning the raw data if streaming fails
-            yield raw_data
+            yield {
+                "type": "error",
+                "content": str(e)
+            }

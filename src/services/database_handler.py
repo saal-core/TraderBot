@@ -1,18 +1,13 @@
 """
-Database Query Handler - Generates SQL and explains results using QWEN streaming
+Database Query Handler - Generates SQL and explains results using configurable LLM provider
 """
 from typing import Dict, List, Tuple, Optional, Generator
-from langchain_community.llms import Ollama
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from src.config.settings import get_ollama_config, get_openai_config, get_qwen_config
+from src.config.llm_provider import get_llm, get_streaming_llm, get_active_provider, get_provider_config
 from src.config.prompts import (
-    DATABASE_EXPLANATION_PROMPT,
     STOCK_EXTRACTION_PROMPT,
     SYMBOL_MATCHING_PROMPT,
-    detect_language,
-    ARABIC_FINANCIAL_GLOSSARY
 )
 from src.services.chat_memory import ChatMemory
 import os
@@ -34,8 +29,7 @@ class DatabaseQueryHandler:
         Initialize the database query handler
 
         Args:
-            model_name: Name of the model to use (defaults to config)
-            use_openai: Whether to use OpenAI for SQL generation (True) or Ollama (False)
+            model_name: Name of the model to use (defaults to provider config)
             sql_executor: Optional SQL executor for fetching dynamic data
             memory_max_pairs: Maximum number of Q&A pairs to remember for follow-up questions
         """
@@ -44,36 +38,18 @@ class DatabaseQueryHandler:
         self._portfolio_context_cache = None  # Cache for portfolio context
         self.chat_memory = ChatMemory(max_pairs=memory_max_pairs)
 
-        ollama_config = get_ollama_config()
-        self.model_name = model_name or ollama_config["model_name"]
-        self.base_url = ollama_config["base_url"]
-        self.temperature = ollama_config["temperature_sql"]
-
-        # CONFIG CHANGE: Using QWEN (H100) for SQL Generation for testing
-        qwen_config = get_qwen_config()
-        print(f"🚀 Switching SQL Generation to QWEN H100 (Testing Mode)")
+        # Get LLM from provider configuration  
+        provider = get_active_provider()
+        config = get_provider_config()
+        self.model_name = model_name or config["model_name"]
         
-        self.llm = ChatOpenAI(
-            model=qwen_config.get("model_name", "Qwen3-30B-A3B"),
-            base_url=qwen_config["base_url"],
-            api_key=qwen_config["api_key"],
-            temperature=0.1,  # Low temperature for SQL precision
-            top_p=qwen_config.get("top_p", 0.8),
-            max_retries=2,
-            extra_body=qwen_config.get("extra_body", {})
-        )
-
-        # Use QWEN (H100) for explanations - faster than local Ollama
-        self.explanation_llm = ChatOpenAI(
-            model=qwen_config.get("model_name", "Qwen3-30B-A3B"),
-            base_url=qwen_config["base_url"],
-            api_key=qwen_config["api_key"],
-            temperature=qwen_config.get("temperature", 0.7),
-            top_p=qwen_config.get("top_p", 0.8),
-            max_retries=2,
-            streaming=True,  # Enable streaming
-            extra_body=qwen_config.get("extra_body", {})
-        )
+        print(f"🚀 SQL Generation using {provider.upper()}: {self.model_name}")
+        
+        # LLM for SQL generation (low temperature for precision)
+        self.llm = get_llm(temperature=0.1)
+        
+        # LLM for explanations (streaming, higher temperature)
+        self.explanation_llm = get_streaming_llm(temperature=0.7)
 
         # Load custom prompt template
         self.custom_prompt_template = self._load_custom_prompt()
@@ -85,12 +61,6 @@ class DatabaseQueryHandler:
         )
 
         self.sql_chain = self.sql_prompt | self.llm | StrOutputParser()
-
-        # Explanation prompt with language and glossary placeholders
-        self.explain_prompt = PromptTemplate(
-            input_variables=["query", "results", "sql_query", "today_date", "language", "arabic_glossary"],
-            template=DATABASE_EXPLANATION_PROMPT
-        )
 
     def _load_custom_prompt(self) -> str:
         """Load custom prompt from test2sql_prompt.md"""
@@ -106,7 +76,11 @@ class DatabaseQueryHandler:
         return prompt_content
 
     def _format_conversation_history(self, chat_history: List[Dict[str, str]]) -> str:
-        """Format conversation history for SQL generation context"""
+        """Format conversation history for SQL generation context.
+        
+        Includes SQL queries and results summaries from previous messages to give 
+        the LLM context about what data was previously queried and returned.
+        """
         if not chat_history:
             print("📝 Conversation history: Empty (first question)")
             return "No previous conversation (this is the first question)."
@@ -123,13 +97,67 @@ class DatabaseQueryHandler:
         for msg in recent_messages:
             role = msg.get("role", "").capitalize()
             content = msg.get("content", "")
+            sql_query = msg.get("sql_query", "")
+            results = msg.get("results")
 
             if len(content) > 200:
                 content = content[:200] + "..."
 
             formatted_lines.append(f"{role}: {content}")
+            
+            # Include SQL query if present (critical for follow-up questions!)
+            if sql_query and role.lower() == "assistant":
+                # Truncate very long SQL queries
+                if len(sql_query) > 500:
+                    sql_query = sql_query[:500] + "..."
+                formatted_lines.append(f"[Previous SQL Query: {sql_query}]")
+            
+            # Include results summary if present (critical for "those", "them" references!)
+            if results and role.lower() == "assistant":
+                results_summary = self._summarize_results(results)
+                if results_summary:
+                    formatted_lines.append(f"[Query Results: {results_summary}]")
 
         return "\n".join(formatted_lines)
+
+    def _summarize_results(self, results) -> str:
+        """Create a compact summary of query results for context.
+        
+        Extracts key identifiers (symbols, portfolio names) that can be referenced
+        in follow-up questions.
+        """
+        try:
+            if results is None:
+                return ""
+            
+            # Handle list of dicts (common format from API)
+            if isinstance(results, list) and len(results) > 0:
+                # Extract key columns for context
+                sample = results[0] if results else {}
+                keys = list(sample.keys()) if isinstance(sample, dict) else []
+                
+                summary_parts = []
+                summary_parts.append(f"{len(results)} rows")
+                
+                # Extract important identifiers
+                identifiers = []
+                for row in results[:10]:  # Limit to first 10 rows
+                    if isinstance(row, dict):
+                        # Look for symbol, portfolio_name, or other key identifiers
+                        for key in ['symbol', 'portfolio_name', 'account_id']:
+                            if key in row and row[key]:
+                                identifiers.append(str(row[key]))
+                
+                if identifiers:
+                    unique_ids = list(dict.fromkeys(identifiers))[:8]  # First 8 unique
+                    summary_parts.append(f"includes: {', '.join(unique_ids)}")
+                
+                return "; ".join(summary_parts)
+            
+            return ""
+        except Exception as e:
+            print(f"⚠️ Error summarizing results: {e}")
+            return ""
 
     def _get_all_symbols_dict(self) -> Dict[str, str]:
         """Fetch all symbols from database and return as dictionary"""
@@ -352,6 +380,7 @@ class DatabaseQueryHandler:
     def explain_results(self, query: str, results_df, sql_query: str) -> str:
         """
         Generate a natural language explanation of query results (non-streaming).
+        Uses UnifiedResponseGenerator for consistent formatting.
 
         Args:
             query: Original user question
@@ -361,36 +390,30 @@ class DatabaseQueryHandler:
         Returns:
             Natural language explanation
         """
+        from src.services.unified_response_generator import get_response_generator
+        
         results_text = format_query_results(results_df) if results_df is not None and not results_df.empty else "No results found"
 
         try:
             start_time = time.time()
-            print(f"⏱️  [QWEN H100] Starting: Results Explanation Generation...")
-
-            today_date = datetime.now().strftime("%A, %B %d, %Y")
+            print(f"⏱️  Starting: Results Explanation Generation...")
             
-            # Detect language and prepare glossary
-            language = detect_language(query)
-            arabic_glossary = ARABIC_FINANCIAL_GLOSSARY if language == "Arabic" else "N/A"
-
-            formatted_prompt = self.explain_prompt.format(
+            generator = get_response_generator()
+            data = {
+                "sql_query": sql_query,
+                "results": results_text
+            }
+            
+            explanation = generator.generate_response(
                 query=query,
-                results=results_text,
-                sql_query=sql_query,
-                today_date=today_date,
-                language=language,
-                arabic_glossary=arabic_glossary
+                context_type="database",
+                data=data
             )
-
-            explanation = self.explanation_llm.invoke(formatted_prompt)
 
             elapsed = time.time() - start_time
             print(f"✅ Completed: Results Explanation in {elapsed:.2f}s")
 
-            # Handle AIMessage response
-            if hasattr(explanation, 'content'):
-                return explanation.content.strip()
-            return str(explanation).strip()
+            return explanation
 
         except Exception as e:
             print(f"❌ Error explaining results: {e}")
@@ -399,7 +422,7 @@ class DatabaseQueryHandler:
     def stream_explain_results(self, query: str, results_df, sql_query: str):
         """
         Stream a natural language explanation of query results.
-        Uses QWEN (H100) for faster explanations with streaming.
+        Uses UnifiedResponseGenerator for consistent formatting.
 
         Args:
             query: Original user question
@@ -409,44 +432,34 @@ class DatabaseQueryHandler:
         Yields:
             String chunks of the explanation
         """
+        from src.services.unified_response_generator import get_response_generator
+        
         # Use TOON format for token-efficient results representation
         results_text = format_query_results(results_df) if results_df is not None and not results_df.empty else "No results found"
 
-        # Detect language and prepare glossary
-        language = detect_language(query)
-        arabic_glossary = ARABIC_FINANCIAL_GLOSSARY if language == "Arabic" else "N/A"
-
-        explain_prompt = PromptTemplate(
-            input_variables=["query", "results", "sql_query", "today_date", "language", "arabic_glossary"],
-            template=DATABASE_EXPLANATION_PROMPT
-        )
-
-        explain_chain = explain_prompt | self.explanation_llm | StrOutputParser()
-
         try:
-            print(f"⏱️  [QWEN H100] Starting: Streaming Results Explanation ({language})...")
-
-            # Get today's date for context
-            today_date = datetime.now().strftime("%A, %B %d, %Y")
-            
+            print(f"⏱️  Starting: Streaming Results Explanation...")
             start_time = time.time()
             first_token_received = False
-
-            for chunk in explain_chain.stream({
-                "query": query,
-                "results": results_text,
+            
+            generator = get_response_generator()
+            data = {
                 "sql_query": sql_query,
-                "today_date": today_date,
-                "language": language,
-                "arabic_glossary": arabic_glossary
-            }):
+                "results": results_text
+            }
+            
+            for chunk in generator.stream_response(
+                query=query,
+                context_type="database",
+                data=data
+            ):
                 if not first_token_received:
                     elapsed = time.time() - start_time
                     print(f"⚡ First token received in {elapsed:.4f}s")
                     first_token_received = True
                 yield chunk
 
-            print(f"✅ [QWEN H100] Completed: Streaming Explanation")
+            print(f"✅ Completed: Streaming Explanation")
         except Exception as e:
             print(f"❌ Error streaming explanation: {e}")
             yield "I found the results but had trouble explaining them."
