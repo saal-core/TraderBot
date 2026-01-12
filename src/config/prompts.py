@@ -31,6 +31,7 @@ Provide a clear, helpful answer based on the available data. Adapt your response
 - Generate your response as HTML, NOT markdown
 - Use <p> tags for paragraphs
 - Use <ul> and <li> for bullet lists
+- Make sure to generate correct HTML tags for every line pay attention to the opening and closing tags
 
 **STYLING RULES - APPLY TO ALL VALUES, EVERY TIME:**
 - ALL currency amounts: <span class="currency">$1,234.56</span> (EVERY dollar amount must be wrapped)

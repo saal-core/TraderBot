@@ -204,8 +204,9 @@ def process_streaming_query(question: str):
                     content = evt.get("content", "")
                     if content:
                         full_response += content
-                        # Display as HTML with cursor
-                        response_placeholder.markdown(f'<div class="response-content">{full_response}</div>▌', unsafe_allow_html=True)
+                        # Display as HTML with cursor - use write for better HTML handling
+                        html_content = f'<div class="response-content">{full_response}</div>▌'
+                        response_placeholder.write(html_content, unsafe_allow_html=True)
                     status_placeholder.empty()
                     
                 elif event_type == "assistant_message_complete":
@@ -213,7 +214,8 @@ def process_streaming_query(question: str):
                     final_data.update(data)
                     status_placeholder.empty()
                     # Final render - show complete response as HTML
-                    response_placeholder.markdown(f'<div class="response-content">{full_response}</div>', unsafe_allow_html=True)
+                    html_content = f'<div class="response-content">{full_response}</div>'
+                    response_placeholder.write(html_content, unsafe_allow_html=True)
                     
                     # Update router classification if not already shown
                     if final_data.get("query_type") and type_placeholder:
@@ -238,16 +240,31 @@ def process_streaming_query(question: str):
                     st.error(f"❌ {error_msg}")
                     return None
                     
-                elif event_type == "stream_end":
                     # Final render without cursor
-                    response_placeholder.markdown(f'<div class="response-content">{full_response}</div>', unsafe_allow_html=True)
+                    html_content = f'<div class="response-content">{full_response}</div>'
+                    response_placeholder.write(html_content, unsafe_allow_html=True)
                     break
                     
             except json.JSONDecodeError:
                 continue
+            except Exception as render_error:
+                # Catch any rendering/processing error and log it
+                print(f"⚠️ Rendering warning: {render_error}")
+                continue
         
-        # Ensure final display is clean
-        response_placeholder.markdown(f'<div class="response-content">{full_response}</div>', unsafe_allow_html=True)
+        # Ensure final display is clean with error handling
+        try:
+            if full_response:
+                html_content = f'<div class="response-content">{full_response}</div>'
+                response_placeholder.write(html_content, unsafe_allow_html=True)
+        except Exception as final_render_error:
+            # Fallback: show plain text if HTML rendering fails
+            print(f"❌ Final render error: {final_render_error}")
+            try:
+                # Try without HTML wrapper
+                response_placeholder.markdown(full_response)
+            except:
+                response_placeholder.text(full_response or "Response could not be displayed")
         
         # Update final_data with the full streamed response
         if full_response:
@@ -257,6 +274,9 @@ def process_streaming_query(question: str):
         
     except requests.exceptions.RequestException as e:
         st.error(f"Failed to connect to the API: {str(e)}")
+        return None
+    except Exception as general_error:
+        st.error(f"An error occurred: {str(general_error)}")
         return None
 
 
@@ -382,7 +402,8 @@ for message in st.session_state.messages:
                 st.info(f"🔍 **Router Classification:** {message['query_type']}")
             
             # Show response content as HTML
-            st.markdown(f'<div class="response-content">{message["content"]}</div>', unsafe_allow_html=True)
+            html_content = f'<div class="response-content">{message["content"]}</div>'
+            st.write(html_content, unsafe_allow_html=True)
             
             # 2. Show SQL query in foldable expander
             if message.get("sql_query"):
