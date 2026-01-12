@@ -24,48 +24,44 @@ LLM_ROUTER_PROMPT = """You are an expert query classifier for a financial portfo
 
 **Classification Rules:**
 
-1. **database** - Questions about the user's personal portfolio data ONLY:
+1. **database** - Questions about the user's portfolio data (INCLUDING stored benchmark comparisons):
    - Portfolio holdings, positions, stocks, investments
    - Profit/loss, returns, PnL, gains
    - YTD/MTD/QTD performance
-   - Portfolio attributes (description, benchmark, cost model)
+   - Portfolio attributes (description, benchmark, cost model, default index)
    - Top/bottom performing stocks in their portfolio
+   - **Portfolio vs benchmark/index comparisons** (benchmark data is stored in the database)
+   - "Which portfolio outperformed its YTD index return?"
+   - "Compare portfolio returns with benchmarks" / "قارن عوائد المحفظة بالمؤشرات القياسية"
    - Any follow-up questions about previous database queries
 
 2. **internet_data** - Questions requiring ONLY real-time external market data:
    - Current stock prices (not asking about portfolio holdings)
-   - Market news, trends, indices
+   - Market news, trends, live indices
    - Hypothetical investments ("if I had invested...")
    - Crypto, forex, commodity prices
    - Market movers on NASDAQ/NYSE
-   - Top gainers/losers in the market
+   - Top gainers/losers in the market TODAY
 
-3. **hybrid** - Questions that need BOTH portfolio data AND market data:
+3. **hybrid** - Questions that need BOTH portfolio data AND LIVE market data:
    - "What are the top performing stocks today and how much do I have of each in my portfolio?"
-   - "Show me current prices of all stocks in my portfolio"
-   - "What's the market cap of my top holdings?"
-   - Queries asking for portfolio data enriched with live market data
-   - Queries asking for market data filtered by portfolio holdings
+   - "Show me CURRENT prices of all stocks in my portfolio"
+   - "What's the CURRENT market cap of my top holdings?"
+   - Queries asking for portfolio data enriched with LIVE market data
+   - Must explicitly need REAL-TIME data from external sources
 
-4. **comparison** - Questions explicitly COMPARING portfolio performance WITH benchmarks:
-   - "Compare my portfolio to S&P 500"
-   - "How does my portfolio perform against the market?"
-   - "Am I beating the market?"
-   - "Is my portfolio outperforming NASDAQ?"
-   - Must have explicit comparison intent (vs, against, outperform, beat)
-
-5. **greeting** - Chitchat, greetings, small talk:
+4. **greeting** - Chitchat, greetings, small talk:
    - "Hi", "Hello", "How are you?"
    - "Who are you?", "What can you do?"
    - "Thank you", "Goodbye"
 
-**IMPORTANT - Category Selection:**
-- If query needs portfolio data + live market data WITHOUT comparison intent → **hybrid**
-- If query explicitly compares performance → **comparison**
-- If query is ONLY about portfolio → **database**
-- If query is ONLY about market data → **internet_data**
+**CRITICAL - Category Selection:**
+- Portfolio vs benchmark/index comparisons using STORED data → **database** (NOT hybrid)
+- If query needs portfolio data + LIVE/CURRENT market data → **hybrid**
+- If query is about portfolio data (including stored benchmarks) → **database**
+- If query is ONLY about real-time market data → **internet_data**
 
-Respond with ONLY ONE of: database, internet_data, hybrid, comparison, greeting
+Respond with ONLY ONE of: database, internet_data, hybrid, greeting
 
 Category:"""
 
@@ -162,8 +158,6 @@ class LLMQueryRouter:
                 result = "database"
             elif "internet" in category:
                 result = "internet_data"
-            elif "comparison" in category:
-                result = "comparison"
             elif "greeting" in category:
                 result = "greeting"
             else:

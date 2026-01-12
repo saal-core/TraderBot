@@ -82,6 +82,21 @@ st.markdown("""
         color: #fc8181;
         font-weight: 600;
     }
+    /* Arabic RTL Styling */
+    .rtl-content {
+        direction: rtl;
+        text-align: right;
+        font-family: 'Noto Naskh Arabic', 'Segoe UI', Tahoma, sans-serif;
+    }
+    .rtl-content p, .rtl-content li, .rtl-content span {
+        direction: rtl;
+        text-align: right;
+    }
+    .rtl-content ul {
+        padding-right: 1.5rem;
+        padding-left: 0;
+        list-style-position: inside;
+    }
     </style>
     """, unsafe_allow_html=True)
 

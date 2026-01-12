@@ -155,7 +155,12 @@ WHERE datetime = (SELECT MAX(datetime) FROM ai_trading.table_name [WHERE is_acti
 - If unsure about a column name, check Section 1 exactly
 
 **Answer What Was Asked:**
-- "What is total net liquidity?" → `SELECT SUM(net_liquidity)` - that's it
-- "Which portfolio outperformed?" → Return just the portfolio name and alpha
-- Do NOT add extra columns unless the user explicitly asks for comprehensive data
-- Only add multiple period returns if user says "performance", "summary", or "overview"
+- **Simple questions:** "What is total net liquidity?" → `SELECT SUM(net_liquidity)` - just what was asked
+- **Comparison questions:** When comparing portfolio vs benchmark/index, include ALL relevant metrics:
+  - Always include: `portfolio_name`, `default_index`
+  - Include multiple periods: `mtd_return`, `qtd_return`, `ytd_return`, `all_return`
+  - Include benchmark: `mtd_index_return`, `qtd_index_return`, `ytd_index_return`, `all_index_return`
+  - Calculate alpha: `(ytd_return - ytd_index_return) AS ytd_alpha`
+- **Performance/Summary requests:** Include MTD, QTD, YTD, and All-Time metrics
+- Do NOT limit to just one period for comparison questions
+- Only use simple single-column responses for direct value lookups (e.g., "What is my balance?")
