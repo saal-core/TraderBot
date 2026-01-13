@@ -144,13 +144,22 @@ class UnifiedResponseGenerator:
                 "arabic_glossary": ARABIC_FINANCIAL_GLOSSARY if language == "Arabic" else ""
             }
             
-            # Stream response chunks
+            # Stream response chunks and log them
+            full_response = ""
             for chunk in self.llm.stream(self.prompt_template.format(**prompt_input)):
                 # Handle both string chunks and AIMessageChunk objects
                 if hasattr(chunk, 'content'):
-                    yield clean_llm_chunk(chunk.content)
+                    cleaned = clean_llm_chunk(chunk.content)
                 else:
-                    yield clean_llm_chunk(str(chunk))
+                    cleaned = clean_llm_chunk(str(chunk))
+                full_response += cleaned
+                yield cleaned
+            
+            # Log the full response for debugging
+            print(f"📝 [DEBUG] Full LLM Response ({len(full_response)} chars):")
+            print(f"{'='*60}")
+            print(full_response)
+            print(f"{'='*60}")
                     
         except Exception as e:
             error_msg = f"<p>Error generating response: {str(e)}</p>"

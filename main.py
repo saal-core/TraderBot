@@ -181,73 +181,99 @@ def process_streaming_query(question: str):
         final_data = {"final_answer": "", "sql_query": None, "results": None, "query_type": None}
         full_response = ""
         
-        for raw in response.iter_lines(decode_unicode=True):
-            if not raw or not raw.startswith("data:"):
-                continue
+        # Use iter_content for unbuffered streaming
+        buffer = ""
+        for chunk in response.iter_content(chunk_size=None, decode_unicode=True):
+            if chunk:
+                buffer += chunk
             
-            try:
-                evt = json.loads(raw[5:].strip())
-                event_type = evt.get("type")
+            # Process complete SSE events (end with \n\n)
+            while "\n\n" in buffer:
+                event_str, buffer = buffer.split("\n\n", 1)
                 
-                if event_type == "status":
-                    data = evt.get("data", {})
-                    msg = data.get('message', '')
-                    status_placeholder.text(f"{msg}")
-                    
-                    # Show router classification as soon as we get the query type status
-                    if "Query type:" in msg:
-                        query_type = msg.replace("Query type:", "").strip()
-                        type_placeholder.info(f"🔍 **Router Classification:** {query_type}")
-                        final_data["query_type"] = query_type
-                    
-                elif event_type == "content":
-                    content = evt.get("content", "")
-                    if content:
-                        full_response += content
-                        # Display as HTML with cursor
-                        response_placeholder.markdown(f'<div class="response-content">{full_response}</div>▌', unsafe_allow_html=True)
-                    status_placeholder.empty()
-                    
-                elif event_type == "assistant_message_complete":
-                    data = evt.get("data", {})
-                    final_data.update(data)
-                    status_placeholder.empty()
-                    # Final render - show complete response as HTML
-                    response_placeholder.markdown(f'<div class="response-content">{full_response}</div>', unsafe_allow_html=True)
-                    
-                    # Update router classification if not already shown
-                    if final_data.get("query_type") and type_placeholder:
-                        type_placeholder.info(f"🔍 **Router Classification:** {final_data['query_type']}")
-                    
-                    # 2. Show SQL Query in foldable expander
-                    if final_data.get("sql_query"):
-                        with sql_placeholder.container():
-                            with st.expander("📝 Generated SQL Query", expanded=False):
-                                st.code(final_data["sql_query"], language="sql")
-                    
-                    # 3. Show Results Table in foldable expander
-                    if final_data.get("results"):
-                        with results_placeholder.container():
-                            with st.expander("📋 Results Table", expanded=False):
-                                st.dataframe(final_data["results"])
-                    
-                elif event_type == "error":
-                    data = evt.get("data", {})
-                    error_msg = data.get("error", "Unknown error")
-                    status_placeholder.empty()
-                    st.error(f"❌ {error_msg}")
-                    return None
-                    
-                elif event_type == "stream_end":
-                    # Final render without cursor
-                    response_placeholder.markdown(f'<div class="response-content">{full_response}</div>', unsafe_allow_html=True)
-                    break
-                    
-            except json.JSONDecodeError:
-                continue
+                for raw in event_str.split("\n"):
+                    if not raw or not raw.startswith("data:"):
+                        continue
+            
+                    try:
+                        evt = json.loads(raw[5:].strip())
+                        event_type = evt.get("type")
+                
+                        if event_type == "status":
+                            data = evt.get("data", {})
+                            msg = data.get('message', '')
+                            status_placeholder.text(f"{msg}")
+                            
+                            # Show router classification as soon as we get the query type status
+                            if "Query type:" in msg:
+                                query_type = msg.replace("Query type:", "").strip()
+                                type_placeholder.info(f"🔍 **Router Classification:** {query_type}")
+                                final_data["query_type"] = query_type
+                            
+                        elif event_type == "content":
+                            content = evt.get("content", "")
+                            if content:
+                                full_response += content
+                                # Helper to strip indentation for rendering
+                                render_text = re.sub(r'^\s+', '', full_response, flags=re.MULTILINE)
+                                # Display as HTML with cursor - use write for better HTML handling
+                                html_content = f'<div class="response-content">{render_text}</div>▌'
+                                response_placeholder.markdown(html_content, unsafe_allow_html=True)
+                            status_placeholder.empty()
+                            
+                        elif event_type == "assistant_message_complete":
+                            data = evt.get("data", {})
+                            final_data.update(data)
+                            status_placeholder.empty()
+                            # Final render - show complete response as HTML
+                            render_text = re.sub(r'^\s+', '', full_response, flags=re.MULTILINE)
+                            html_content = f'<div class="response-content">{render_text}</div>'
+                            response_placeholder.markdown(html_content, unsafe_allow_html=True)
+                            
+                            # Update router classification if not already shown
+                            if final_data.get("query_type") and type_placeholder:
+                                type_placeholder.info(f"🔍 **Router Classification:** {final_data['query_type']}")
+                            
+                            # 2. Show SQL Query in foldable expander
+                            if final_data.get("sql_query"):
+                                with sql_placeholder.container():
+                                    with st.expander("📝 Generated SQL Query", expanded=False):
+                                        st.code(final_data["sql_query"], language="sql")
+                            
+                            # 3. Show Results Table in foldable expander
+                            if final_data.get("results"):
+                                with results_placeholder.container():
+                                    with st.expander("📋 Results Table", expanded=False):
+                                        st.dataframe(final_data["results"])
+                            
+                        elif event_type == "error":
+                            data = evt.get("data", {})
+                            error_msg = data.get("error", "Unknown error")
+                            status_placeholder.empty()
+                            st.error(f"❌ {error_msg}")
+                            return None
+                            
+                    except json.JSONDecodeError:
+                        continue
+                    except Exception as render_error:
+                        # Catch any rendering/processing error and log it
+                        print(f"⚠️ Rendering warning: {render_error}")
+                        continue
         
-        # Ensure final display is clean
-        response_placeholder.markdown(f'<div class="response-content">{full_response}</div>', unsafe_allow_html=True)
+        # Ensure final display is clean with error handling
+        try:
+            if full_response:
+                render_text = re.sub(r'^\s+', '', full_response, flags=re.MULTILINE)
+                html_content = f'<div class="response-content">{render_text}</div>'
+                response_placeholder.markdown(html_content, unsafe_allow_html=True)
+        except Exception as final_render_error:
+            # Fallback: show plain text if HTML rendering fails
+            print(f"❌ Final render error: {final_render_error}")
+            try:
+                # Try without HTML wrapper
+                response_placeholder.markdown(full_response)
+            except:
+                response_placeholder.text(full_response or "Response could not be displayed")
         
         # Update final_data with the full streamed response
         if full_response:
@@ -257,6 +283,9 @@ def process_streaming_query(question: str):
         
     except requests.exceptions.RequestException as e:
         st.error(f"Failed to connect to the API: {str(e)}")
+        return None
+    except Exception as general_error:
+        st.error(f"An error occurred: {str(general_error)}")
         return None
 
 
@@ -321,6 +350,29 @@ st.markdown("""
     Ask questions about your portfolio, compare with market data, or get real-time financial information.
 """)
 
+# Function to update stats display
+def update_stats_display(placeholder):
+    """Fetch and display query statistics in the given placeholder."""
+    if not st.session_state.initialized:
+        return
+        
+    try:
+        stats_response = requests.get(f"{API_BASE_URL}/stats", timeout=5)
+        if stats_response.status_code == 200:
+            stats = stats_response.json()
+            with placeholder.container():
+                st.subheader("📈 Query Statistics")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Database", stats.get("database", 0))
+                    st.metric("Internet", stats.get("internet_data", 0))
+                with col2:
+                    st.metric("Greeting", stats.get("greeting", 0))
+                    st.metric("Hybrid", stats.get("hybrid", 0))
+                st.metric("Total", stats.get("total", 0))
+    except Exception:
+        pass
+
 # Sidebar for settings and info
 with st.sidebar:
     st.header("⚙️ Settings")
@@ -353,23 +405,9 @@ with st.sidebar:
     
     st.divider()
     
-    # Stats display
-    if st.session_state.initialized:
-        try:
-            stats_response = requests.get(f"{API_BASE_URL}/stats", timeout=5)
-            if stats_response.status_code == 200:
-                stats = stats_response.json()
-                st.subheader("📈 Query Statistics")
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Database", stats.get("database", 0))
-                    st.metric("Internet", stats.get("internet_data", 0))
-                with col2:
-                    st.metric("Greeting", stats.get("greeting", 0))
-                    st.metric("Hybrid", stats.get("hybrid", 0))
-                st.metric("Total", stats.get("total", 0))
-        except:
-            pass
+    # Stats display placeholder
+    stats_placeholder = st.empty()
+    update_stats_display(stats_placeholder)
 
 # Display chat messages
 for message in st.session_state.messages:
@@ -382,7 +420,8 @@ for message in st.session_state.messages:
                 st.info(f"🔍 **Router Classification:** {message['query_type']}")
             
             # Show response content as HTML
-            st.markdown(f'<div class="response-content">{message["content"]}</div>', unsafe_allow_html=True)
+            html_content = f'<div class="response-content">{message["content"]}</div>'
+            st.markdown(html_content, unsafe_allow_html=True)
             
             # 2. Show SQL query in foldable expander
             if message.get("sql_query"):
@@ -450,6 +489,9 @@ if question := st.chat_input("Ask a question about your portfolio or financial d
                     if result.get("results"):
                         with st.expander("📋 Results Table", expanded=False):
                             st.dataframe(result["results"])
+                
+                # Trigger a stats update now that the query is finished
+                update_stats_display(stats_placeholder)
 
 # Footer
 st.markdown("---")

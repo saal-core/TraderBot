@@ -33,6 +33,7 @@ from src.services.greating_handler import GreetingHandler
 from src.services.internet_data_handler import InternetDataHandler
 # ComparisonHandler removed - comparison queries now handled by QueryPlanner + TaskExecutor
 from src.services.chat_memory import ChatMemory
+from src.services.context_manager import ContextAwareManager
 from src.utils.response_cleaner import clean_llm_response, clean_llm_chunk
 
 import warnings
@@ -56,7 +57,9 @@ class AppState:
         self.task_executor: Optional[TaskExecutor] = None
         self.db_handler: Optional[DatabaseQueryHandler] = None
         self.greeting_handler: Optional[GreetingHandler] = None
+        self.greeting_handler: Optional[GreetingHandler] = None
         self.internet_data_handler: Optional[InternetDataHandler] = None
+        self.context_manager: Optional[ContextAwareManager] = None
         # comparison_handler removed - now handled by planner/executor
         self.chat_memory: Optional[ChatMemory] = None
         self.query_stats = {
@@ -191,6 +194,7 @@ async def initialize():
         app_state.greeting_handler = GreetingHandler()
         app_state.internet_data_handler = InternetDataHandler()
         app_state.chat_memory = ChatMemory(max_pairs=5)
+        app_state.context_manager = ContextAwareManager()
         
         app_state.planner = QueryPlanner()
         app_state.task_executor = TaskExecutor(
@@ -622,6 +626,19 @@ async def _stream_query_generator(query: str, chat_history: List[Dict[str, str]]
             yield generate_sse_event("error", {"error": "Service not initialized. Call /initialize first."})
             yield generate_sse_event("stream_end", {})
             return
+
+        # Step 0: Check Context Context Relevance (Smart Reset)
+        # If the user switches topics, we should reset the history context
+        if chat_history and len(chat_history) > 0:
+            # We already have context_manager initialized, use it
+            if app_state.context_manager:
+                is_relevant = app_state.context_manager.check_relevance(query, chat_history)
+                if not is_relevant:
+                    print(f"🔄 Logic Break: Switching topics. Resetting context for query: {query}")
+                    chat_history = [] # Reset history for this request
+                    yield generate_sse_event("status", {"message": "🔄 New topic detected - Context reset..."})
+            else:
+                 print("⚠️ Context Manager not initialized, skipping check")
 
         # Step 1: Classify Query
         yield generate_sse_event("status", {"message": "🤔 Classifying query..."})
