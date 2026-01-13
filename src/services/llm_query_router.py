@@ -30,9 +30,8 @@ LLM_ROUTER_PROMPT = """You are an expert query classifier for a financial portfo
    - YTD/MTD/QTD performance
    - Portfolio attributes (description, benchmark, cost model, default index)
    - Top/bottom performing stocks in their portfolio
-   - **Portfolio vs benchmark/index comparisons** (benchmark data is stored in the database)
-   - "Which portfolio outperformed its YTD index return?"
-   - "Compare portfolio returns with benchmarks" / "قارن عوائد المحفظة بالمؤشرات القياسية"
+   - **Portfolio vs S&P 500 (SPX)** (this benchmark is stored in database)
+   - "Compare portfolio returns with S&P 500"
    - Any follow-up questions about previous database queries
 
 2. **internet_data** - Questions requiring ONLY real-time external market data:
@@ -49,6 +48,7 @@ LLM_ROUTER_PROMPT = """You are an expert query classifier for a financial portfo
    - "What's the CURRENT market cap of my top holdings?"
    - Queries asking for portfolio data enriched with LIVE market data
    - Must explicitly need REAL-TIME data from external sources
+   - **Comparison with external indices (QQQ, NASDAQ, etc.) EXCEPT S&P 500**
 
 4. **greeting** - Chitchat, greetings, small talk:
    - "Hi", "Hello", "How are you?"
@@ -56,7 +56,8 @@ LLM_ROUTER_PROMPT = """You are an expert query classifier for a financial portfo
    - "Thank you", "Goodbye"
 
 **CRITICAL - Category Selection:**
-- Portfolio vs benchmark/index comparisons using STORED data → **database** (NOT hybrid)
+- **S&P 500** comparison → **database** (data is stored)
+- **Other Index** comparison (QQQ, NASDAQ) → **hybrid** (needs internet data)
 - If query needs portfolio data + LIVE/CURRENT market data → **hybrid**
 - If query is about portfolio data (including stored benchmarks) → **database**
 - If query is ONLY about real-time market data → **internet_data**

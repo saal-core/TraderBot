@@ -60,6 +60,10 @@ def clean_llm_response(text: str) -> str:
     # Remove excessive whitespace while preserving paragraph structure
     text = re.sub(r'\n{3,}', '\n\n', text)
     
+    # CRITICAL FIX: Remove 4-space indentation which Markdown treats as code blocks
+    # This prevents HTML from being rendered as raw text in code blocks
+    text = re.sub(r'^\s+', '', text, flags=re.MULTILINE)
+    
     # Clean up leading/trailing whitespace
     text = text.strip()
     

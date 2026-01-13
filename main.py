@@ -204,9 +204,13 @@ def process_streaming_query(question: str):
                     content = evt.get("content", "")
                     if content:
                         full_response += content
+                        # Helper to strip indentation for rendering
+                        render_text = re.sub(r'^\s+', '', full_response, flags=re.MULTILINE)
                         # Display as HTML with cursor - use write for better HTML handling
-                        html_content = f'<div class="response-content">{full_response}</div>▌'
-                        response_placeholder.write(html_content, unsafe_allow_html=True)
+                        html_content = f'<div class="response-content">{render_text}</div>▌'
+
+
+                        response_placeholder.markdown(html_content, unsafe_allow_html=True)
                     status_placeholder.empty()
                     
                 elif event_type == "assistant_message_complete":
@@ -214,8 +218,9 @@ def process_streaming_query(question: str):
                     final_data.update(data)
                     status_placeholder.empty()
                     # Final render - show complete response as HTML
-                    html_content = f'<div class="response-content">{full_response}</div>'
-                    response_placeholder.write(html_content, unsafe_allow_html=True)
+                    render_text = re.sub(r'^\s+', '', full_response, flags=re.MULTILINE)
+                    html_content = f'<div class="response-content">{render_text}</div>'
+                    response_placeholder.markdown(html_content, unsafe_allow_html=True)
                     
                     # Update router classification if not already shown
                     if final_data.get("query_type") and type_placeholder:
@@ -241,8 +246,9 @@ def process_streaming_query(question: str):
                     return None
                     
                     # Final render without cursor
-                    html_content = f'<div class="response-content">{full_response}</div>'
-                    response_placeholder.write(html_content, unsafe_allow_html=True)
+                    render_text = re.sub(r'^\s+', '', full_response, flags=re.MULTILINE)
+                    html_content = f'<div class="response-content">{render_text}</div>'
+                    response_placeholder.markdown(html_content, unsafe_allow_html=True)
                     break
                     
             except json.JSONDecodeError:
@@ -255,8 +261,9 @@ def process_streaming_query(question: str):
         # Ensure final display is clean with error handling
         try:
             if full_response:
-                html_content = f'<div class="response-content">{full_response}</div>'
-                response_placeholder.write(html_content, unsafe_allow_html=True)
+                render_text = re.sub(r'^\s+', '', full_response, flags=re.MULTILINE)
+                html_content = f'<div class="response-content">{render_text}</div>'
+                response_placeholder.markdown(html_content, unsafe_allow_html=True)
         except Exception as final_render_error:
             # Fallback: show plain text if HTML rendering fails
             print(f"❌ Final render error: {final_render_error}")
@@ -341,6 +348,29 @@ st.markdown("""
     Ask questions about your portfolio, compare with market data, or get real-time financial information.
 """)
 
+# Function to update stats display
+def update_stats_display(placeholder):
+    """Fetch and display query statistics in the given placeholder."""
+    if not st.session_state.initialized:
+        return
+        
+    try:
+        stats_response = requests.get(f"{API_BASE_URL}/stats", timeout=5)
+        if stats_response.status_code == 200:
+            stats = stats_response.json()
+            with placeholder.container():
+                st.subheader("📈 Query Statistics")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Database", stats.get("database", 0))
+                    st.metric("Internet", stats.get("internet_data", 0))
+                with col2:
+                    st.metric("Greeting", stats.get("greeting", 0))
+                    st.metric("Hybrid", stats.get("hybrid", 0))
+                st.metric("Total", stats.get("total", 0))
+    except Exception:
+        pass
+
 # Sidebar for settings and info
 with st.sidebar:
     st.header("⚙️ Settings")
@@ -373,23 +403,9 @@ with st.sidebar:
     
     st.divider()
     
-    # Stats display
-    if st.session_state.initialized:
-        try:
-            stats_response = requests.get(f"{API_BASE_URL}/stats", timeout=5)
-            if stats_response.status_code == 200:
-                stats = stats_response.json()
-                st.subheader("📈 Query Statistics")
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Database", stats.get("database", 0))
-                    st.metric("Internet", stats.get("internet_data", 0))
-                with col2:
-                    st.metric("Greeting", stats.get("greeting", 0))
-                    st.metric("Hybrid", stats.get("hybrid", 0))
-                st.metric("Total", stats.get("total", 0))
-        except:
-            pass
+    # Stats display placeholder
+    stats_placeholder = st.empty()
+    update_stats_display(stats_placeholder)
 
 # Display chat messages
 for message in st.session_state.messages:
@@ -403,7 +419,7 @@ for message in st.session_state.messages:
             
             # Show response content as HTML
             html_content = f'<div class="response-content">{message["content"]}</div>'
-            st.write(html_content, unsafe_allow_html=True)
+            st.markdown(html_content, unsafe_allow_html=True)
             
             # 2. Show SQL query in foldable expander
             if message.get("sql_query"):
@@ -471,6 +487,9 @@ if question := st.chat_input("Ask a question about your portfolio or financial d
                     if result.get("results"):
                         with st.expander("📋 Results Table", expanded=False):
                             st.dataframe(result["results"])
+                
+                # Trigger a stats update now that the query is finished
+                update_stats_display(stats_placeholder)
 
 # Footer
 st.markdown("---")

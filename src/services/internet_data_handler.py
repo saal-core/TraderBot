@@ -47,20 +47,8 @@ class InternetDataHandler:
         self.explanation_llm = get_streaming_llm(temperature=0.7)
         self.llm_type = f"{provider.upper()}"  # For logging purposes
 
-        # Company to symbol mapping
-        self.company_to_symbol = {
-            "apple": "AAPL", "microsoft": "MSFT", "google": "GOOGL",
-            "alphabet": "GOOGL", "amazon": "AMZN", "tesla": "TSLA",
-            "nvidia": "NVDA", "meta": "META", "facebook": "META",
-            "netflix": "NFLX", "disney": "DIS", "nike": "NKE",
-            "coca-cola": "KO", "pepsi": "PEP", "walmart": "WMT",
-            "boeing": "BA", "intel": "INTC", "amd": "AMD",
-            "spotify": "SPOT", "uber": "UBER", "airbnb": "ABNB",
-            "zoom": "ZM", "paypal": "PYPL", "visa": "V",
-            "mastercard": "MA", "jpmorgan": "JPM", "goldman": "GS",
-            "berkshire": "BRK-B",
-        }
-        
+
+
         # LLM for query rewriting (low temperature for accuracy)
         self.rewrite_llm = get_llm(temperature=0.1, max_tokens=100)
 
@@ -98,8 +86,8 @@ class InternetDataHandler:
    - Data: Fetches real-time cryptocurrency prices
 
 6. **INDEX_PERFORMANCE** - For market indices
-   - Use when: User asks about S&P 500, NASDAQ, Dow Jones, or market indices
-   - Examples: "How is S&P 500 doing", "NASDAQ performance", "Dow Jones today"
+   - Use when: User asks about  NASDAQ, Dow Jones, QQQ or any other index expect S&P 500 this index is in our database
+   - Examples: "NASDAQ performance", "Dow Jones today", "QQQ performance"
    - Data: Fetches index values and daily changes
 
 7. **FOREX** - For currency exchange rates
@@ -206,27 +194,80 @@ Category:"""
             return query
 
     def _resolve_symbol(self, query: str) -> Optional[str]:
-        """Extract and resolve stock symbol from query."""
-        query_lower = query.lower()
-
-        for company, symbol in self.company_to_symbol.items():
-            if company in query_lower:
-                return symbol
-
+        """
+        Extract and resolve stock symbol from query using LLM.
+        Handles any language (English, Arabic, etc.) and company name variations.
+        """
+        import time
+        start_time = time.time()
+        
+        # First, try direct ticker match (e.g., "AAPL" explicitly in query)
         ticker_match = re.search(r'\b([A-Z]{1,5})\b', query)
         if ticker_match:
             potential_symbol = ticker_match.group(1)
             quote = self.fmp.get_quote(potential_symbol)
             if quote:
+                print(f"  → Symbol resolved via ticker match: {potential_symbol}")
                 return potential_symbol
+        
+        # Use LLM to extract company/stock name from query (supports any language)
+        try:
+            symbol_prompt = """Extract the stock symbol or company name from this query.
+The query may be in English, Arabic, or any other language.
 
+Examples:
+- "What is Apple's stock price?" → AAPL
+- "ما هو سعر سهم أبل؟" → AAPL (أبل = Apple)
+- "Show me TSLA performance" → TSLA
+- "How is Microsoft doing?" → MSFT
+- "سعر نفيديا" → NVDA (نفيديا = NVIDIA)
+- "جوجل اليوم" → GOOGL (جوجل = Google)
+- "أمازون" → AMZN (أمازون = Amazon)
+
+Query: {query}
+
+Respond with ONLY the stock ticker symbol (e.g., AAPL, MSFT, TSLA).
+If you cannot identify a stock/company, respond with "NONE".
+
+Symbol:"""
+            
+            response = self.classify_llm.invoke(symbol_prompt.format(query=query))
+            extracted = response.content.strip().upper() if hasattr(response, 'content') else str(response).strip().upper()
+            
+            # Clean up response
+            extracted = extracted.replace("SYMBOL:", "").replace(":", "").strip()
+            
+            elapsed = (time.time() - start_time) * 1000
+            
+            if extracted and extracted != "NONE" and len(extracted) <= 5:
+                # Validate the symbol exists via FMP
+                quote = self.fmp.get_quote(extracted)
+                if quote:
+                    print(f"  → Symbol resolved via LLM: {extracted} ({elapsed:.1f}ms)")
+                    return extracted
+                else:
+                    # Try FMP search as fallback
+                    results = self.fmp.search_symbol(extracted, limit=1)
+                    if results:
+                        symbol = results[0].get("symbol")
+                        print(f"  → Symbol resolved via LLM+FMP search: {symbol} ({elapsed:.1f}ms)")
+                        return symbol
+            
+            print(f"  → LLM could not resolve symbol from query ({elapsed:.1f}ms)")
+            
+        except Exception as e:
+            print(f"  → LLM symbol extraction failed: {e}")
+        
+        # Final fallback: try searching FMP with query words
         words = query.split()
         for word in words:
-            if len(word) > 2 and word[0].isupper():
+            if len(word) > 2:
                 results = self.fmp.search_symbol(word, limit=1)
                 if results:
-                    return results[0].get("symbol")
-
+                    symbol = results[0].get("symbol")
+                    print(f"  → Symbol resolved via FMP search: {symbol}")
+                    return symbol
+        
         return None
 
     def _parse_date_from_query(self, query: str) -> Tuple[Optional[str], Optional[str]]:
@@ -766,30 +807,61 @@ If you had invested {currency_symbol}{amount:,.0f} in {symbol} on {actual_date},
 **Change:** {change:+,.2f} ({change_pct:+.2f}%)"""
 
     def _handle_index(self, query: str) -> str:
-        """Handle market index queries."""
+        """Handle market index queries with YTD return calculation."""
+        from datetime import datetime
+        
         query_lower = query.lower()
 
         indices_to_fetch = []
-
-        if "s&p" in query_lower or "sp500" in query_lower:
-            indices_to_fetch.append(("^GSPC", "S&P 500"))
-        if "nasdaq" in query_lower:
-            indices_to_fetch.append(("^IXIC", "NASDAQ"))
+        if "qqq" in query_lower:
+            # QQQ is an ETF, use its symbol directly
+            indices_to_fetch.append(("QQQ", "QQQ (Invesco QQQ Trust)"))
+        if "nasdaq" in query_lower and "qqq" not in query_lower:
+            indices_to_fetch.append(("^IXIC", "NASDAQ Composite"))
         if "dow" in query_lower:
             indices_to_fetch.append(("^DJI", "Dow Jones"))
 
         if not indices_to_fetch:
-            indices_to_fetch = [("SPX", "S&P 500")]
+            # Default fallback
+            indices_to_fetch = [("^GSPC", "S&P 500")]
 
-        response = "**Market Indices**\n\n"
+        response = "**Market Indices Performance**\n\n"
+        current_year = datetime.now().year
+        jan1_date = f"{current_year}-01-02"  # First trading day of year
 
         for symbol, name in indices_to_fetch:
+            # Get current quote
             quote = self.fmp.get_quote(symbol)
-            if quote:
-                price = quote.get("price", 0)
-                change = quote.get("change", 0)
-                change_pct = quote.get("changesPercentage", 0)
-                response += f"**{name}:** {price:,.2f} ({change:+.2f}, {change_pct:+.2f}%)\n"
+            
+            if not quote:
+                response += f"**{name}:** Data unavailable\n"
+                continue
+                
+            current_price = quote.get("price", 0)
+            daily_change = quote.get("change", 0)
+            daily_change_pct = quote.get("changesPercentage", 0)
+            
+            # Get Jan 1 price for YTD calculation
+            jan1_data = self.fmp.get_price_on_date(symbol, jan1_date)
+            
+            ytd_return = None
+            jan1_price = None
+            if jan1_data:
+                jan1_price = jan1_data.get("close") or jan1_data.get("adjClose")
+                if jan1_price and jan1_price > 0:
+                    ytd_return = ((current_price - jan1_price) / jan1_price) * 100
+            
+            # Build response
+            response += f"**{name} ({symbol})**\n"
+            response += f"- Current Price: ${current_price:,.2f}\n"
+            response += f"- Today's Change: {daily_change:+.2f} ({daily_change_pct:+.2f}%)\n"
+            
+            if ytd_return is not None:
+                response += f"- YTD Return: {ytd_return:+.2f}% (from ${jan1_price:,.2f} on Jan 2)\n"
+            else:
+                response += f"- YTD Return: Unable to calculate (historical data unavailable)\n"
+            
+            response += "\n"
 
         return response
 

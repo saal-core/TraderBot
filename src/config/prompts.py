@@ -25,7 +25,9 @@ Provide a clear, helpful answer based on the available data. Adapt your response
 - **database**: Explain portfolio/financial data insights. Reference specific values, portfolio names, and returns.
 - **internet**: Summarize market data, stock prices, and trends. Highlight key movements.
 - **greeting**: Be friendly and briefly explain your capabilities as a financial assistant.
-- **hybrid**: Combine insights from multiple data sources to provide a comprehensive answer.
+- **hybrid**: Combine insights from multiple data sources. **CRITICAL: When an external index (e.g., QQQ) is provided in "Retrieved Data", you MUST use that data for the comparison and IGNORE any default benchmarks.** 
+- **hypothetical_investment**: Provide insights on hypothetical investment scenarios based on available data.
+- **index_performance**: Provide insights on market indices based on available data. not the default index.
 
 **HTML FORMATTING (CRITICAL - MUST FOLLOW CONSISTENTLY ON EVERY LINE):**
 - Generate your response as HTML, NOT markdown
@@ -39,6 +41,11 @@ Provide a clear, helpful answer based on the available data. Adapt your response
 - ALL portfolio/stock names: <span class="highlight">Portfolio Name</span> or <span class="highlight">AAPL</span>
 - Positive performance words: <span class="positive">outperforming</span>, <span class="positive">gained</span>, <span class="positive">up</span>
 - Negative performance words: <span class="negative">underperforming</span>, <span class="negative">lost</span>, <span class="negative">down</span>
+
+**STRICT DATA PRIORITY RULES (CRITICAL):**
+1. **EXTERNAL INDEX OVERRIDE**: If the user asks for a comparison against a specific index (e.g. QQQ, NASDAQ) AND that data is present in "Retrieved Data" or "Combined Data", **YOU MUST USE THAT EXTERNAL DATA for the comparison**.
+2. **IGNORE DEFAULT BENCHMARK**: In the case above, **COMPLETELY IGNORE** the "Benchmark" or "Index" listed in the "Query Results" (database data). That is the stored default, but the user is explicitly asking for a DIFFERENT comparison.
+3. **CALCULATE THE COMPARISON**: Use the Portfolio Return from "Query Results" and the External Index Return from "Retrieved Data" to calculate outperformance/underperformance manually.
 
 **CONSISTENCY IS CRITICAL:**
 - If you style ONE percentage, you MUST style ALL percentages in the response
@@ -541,6 +548,42 @@ PERPLEXITY_SYSTEM_PROMPT = (
     "Ensure there is always a space between words and numbers. "
     "Do not concatenate numbers and words without spacing (e.g., write '200 in January', not '200inJanuary'). "
 )
+
+
+# ============================================================================
+# CONTEXT RELEVANCE PROMPTS
+# ============================================================================
+
+CONTEXT_RELEVANCE_PROMPT = """You are a conversation flow analyzer. Determine if the CURRENT QUESTION is related to the previous conversation history or if it starts a completely new topic.
+
+HISTORY:
+{history}
+
+CURRENT QUESTION: {query}
+
+INSTRUCTIONS:
+1. If the current question refers to previous entities (e.g., "what about Microsoft?", "show me it", "and for Apple?"), output: RELEVANT
+2. If the current question asks for a comparison related to recent topics, output: RELEVANT
+3. If the current question is a completely new request (e.g., switching from "portfolio value" to "weather" or "unrelated stock"), output: NEW_TOPIC
+4. If in doubt, default to RELEVANT.
+
+Output ONLY one word: RELEVANT or NEW_TOPIC."""
+
+CONTEXT_RELEVANCE_PROMPT = """You are a conversation flow analyzer. Determine if the CURRENT QUESTION is related to the previous conversation history or if it starts a completely new topic.
+
+HISTORY:
+{history}
+
+CURRENT QUESTION: {query}
+
+INSTRUCTIONS:
+1. If the current question refers to previous entities (e.g., "what about Microsoft?", "show me it", "and for Apple?"), output: RELEVANT
+2. If the current question asks for a comparison related to recent topics, output: RELEVANT
+3. If the current question is a completely new request (e.g., switching from "portfolio value" to "weather" or "unrelated stock"), output: NEW_TOPIC
+4. If the question is ambiguous or could be a follow-up, output: RELEVANT
+5. If the question is a greeting or small talk (e.g. "hi", "thanks"), output: NEW_TOPIC
+
+Output ONLY one word: RELEVANT or NEW_TOPIC."""
 
 
 # ============================================================================
