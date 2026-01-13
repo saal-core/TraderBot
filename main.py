@@ -181,82 +181,84 @@ def process_streaming_query(question: str):
         final_data = {"final_answer": "", "sql_query": None, "results": None, "query_type": None}
         full_response = ""
         
-        for raw in response.iter_lines(decode_unicode=True):
-            if not raw or not raw.startswith("data:"):
-                continue
+        # Use iter_content for unbuffered streaming
+        buffer = ""
+        for chunk in response.iter_content(chunk_size=None, decode_unicode=True):
+            if chunk:
+                buffer += chunk
             
-            try:
-                evt = json.loads(raw[5:].strip())
-                event_type = evt.get("type")
+            # Process complete SSE events (end with \n\n)
+            while "\n\n" in buffer:
+                event_str, buffer = buffer.split("\n\n", 1)
                 
-                if event_type == "status":
-                    data = evt.get("data", {})
-                    msg = data.get('message', '')
-                    status_placeholder.text(f"{msg}")
-                    
-                    # Show router classification as soon as we get the query type status
-                    if "Query type:" in msg:
-                        query_type = msg.replace("Query type:", "").strip()
-                        type_placeholder.info(f"🔍 **Router Classification:** {query_type}")
-                        final_data["query_type"] = query_type
-                    
-                elif event_type == "content":
-                    content = evt.get("content", "")
-                    if content:
-                        full_response += content
-                        # Helper to strip indentation for rendering
-                        render_text = re.sub(r'^\s+', '', full_response, flags=re.MULTILINE)
-                        # Display as HTML with cursor - use write for better HTML handling
-                        html_content = f'<div class="response-content">{render_text}</div>▌'
-
-
-                        response_placeholder.markdown(html_content, unsafe_allow_html=True)
-                    status_placeholder.empty()
-                    
-                elif event_type == "assistant_message_complete":
-                    data = evt.get("data", {})
-                    final_data.update(data)
-                    status_placeholder.empty()
-                    # Final render - show complete response as HTML
-                    render_text = re.sub(r'^\s+', '', full_response, flags=re.MULTILINE)
-                    html_content = f'<div class="response-content">{render_text}</div>'
-                    response_placeholder.markdown(html_content, unsafe_allow_html=True)
-                    
-                    # Update router classification if not already shown
-                    if final_data.get("query_type") and type_placeholder:
-                        type_placeholder.info(f"🔍 **Router Classification:** {final_data['query_type']}")
-                    
-                    # 2. Show SQL Query in foldable expander
-                    if final_data.get("sql_query"):
-                        with sql_placeholder.container():
-                            with st.expander("📝 Generated SQL Query", expanded=False):
-                                st.code(final_data["sql_query"], language="sql")
-                    
-                    # 3. Show Results Table in foldable expander
-                    if final_data.get("results"):
-                        with results_placeholder.container():
-                            with st.expander("📋 Results Table", expanded=False):
-                                st.dataframe(final_data["results"])
-                    
-                elif event_type == "error":
-                    data = evt.get("data", {})
-                    error_msg = data.get("error", "Unknown error")
-                    status_placeholder.empty()
-                    st.error(f"❌ {error_msg}")
-                    return None
-                    
-                    # Final render without cursor
-                    render_text = re.sub(r'^\s+', '', full_response, flags=re.MULTILINE)
-                    html_content = f'<div class="response-content">{render_text}</div>'
-                    response_placeholder.markdown(html_content, unsafe_allow_html=True)
-                    break
-                    
-            except json.JSONDecodeError:
-                continue
-            except Exception as render_error:
-                # Catch any rendering/processing error and log it
-                print(f"⚠️ Rendering warning: {render_error}")
-                continue
+                for raw in event_str.split("\n"):
+                    if not raw or not raw.startswith("data:"):
+                        continue
+            
+                    try:
+                        evt = json.loads(raw[5:].strip())
+                        event_type = evt.get("type")
+                
+                        if event_type == "status":
+                            data = evt.get("data", {})
+                            msg = data.get('message', '')
+                            status_placeholder.text(f"{msg}")
+                            
+                            # Show router classification as soon as we get the query type status
+                            if "Query type:" in msg:
+                                query_type = msg.replace("Query type:", "").strip()
+                                type_placeholder.info(f"🔍 **Router Classification:** {query_type}")
+                                final_data["query_type"] = query_type
+                            
+                        elif event_type == "content":
+                            content = evt.get("content", "")
+                            if content:
+                                full_response += content
+                                # Helper to strip indentation for rendering
+                                render_text = re.sub(r'^\s+', '', full_response, flags=re.MULTILINE)
+                                # Display as HTML with cursor - use write for better HTML handling
+                                html_content = f'<div class="response-content">{render_text}</div>▌'
+                                response_placeholder.markdown(html_content, unsafe_allow_html=True)
+                            status_placeholder.empty()
+                            
+                        elif event_type == "assistant_message_complete":
+                            data = evt.get("data", {})
+                            final_data.update(data)
+                            status_placeholder.empty()
+                            # Final render - show complete response as HTML
+                            render_text = re.sub(r'^\s+', '', full_response, flags=re.MULTILINE)
+                            html_content = f'<div class="response-content">{render_text}</div>'
+                            response_placeholder.markdown(html_content, unsafe_allow_html=True)
+                            
+                            # Update router classification if not already shown
+                            if final_data.get("query_type") and type_placeholder:
+                                type_placeholder.info(f"🔍 **Router Classification:** {final_data['query_type']}")
+                            
+                            # 2. Show SQL Query in foldable expander
+                            if final_data.get("sql_query"):
+                                with sql_placeholder.container():
+                                    with st.expander("📝 Generated SQL Query", expanded=False):
+                                        st.code(final_data["sql_query"], language="sql")
+                            
+                            # 3. Show Results Table in foldable expander
+                            if final_data.get("results"):
+                                with results_placeholder.container():
+                                    with st.expander("📋 Results Table", expanded=False):
+                                        st.dataframe(final_data["results"])
+                            
+                        elif event_type == "error":
+                            data = evt.get("data", {})
+                            error_msg = data.get("error", "Unknown error")
+                            status_placeholder.empty()
+                            st.error(f"❌ {error_msg}")
+                            return None
+                            
+                    except json.JSONDecodeError:
+                        continue
+                    except Exception as render_error:
+                        # Catch any rendering/processing error and log it
+                        print(f"⚠️ Rendering warning: {render_error}")
+                        continue
         
         # Ensure final display is clean with error handling
         try:

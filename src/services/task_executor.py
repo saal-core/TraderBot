@@ -161,6 +161,7 @@ class TaskExecutor:
                          data=data
                      ):
                          yield self._format_event("content", chunk)
+                         await asyncio.sleep(0)  # Force flush for real-time streaming
                            
                      step_result = "Analysis completed"
                      context[step_id] = step_result
