@@ -96,7 +96,7 @@ ALL_QUESTIONS = [
     "What percentage of that portfolio's net liquidity do those winning stocks represent?",
     "What is the realized vs unrealized P&L breakdown for those top 5 holdings?",
     #----------------------------------------------------------------
-    "Which holdings represent more than 50% of any single portfolio's net liquidity?",
+    "Which holdings represent more than 30% of any single portfolio's net liquidity?",
     "For those concentrated positions, what is their current P&L status (profitable or losing)?",
     "Are any of these concentrated positions in the same symbol across multiple portfolios?",
     "For the most concentrated symbol across all portfolios, what is the total exposure and combined P&L?",

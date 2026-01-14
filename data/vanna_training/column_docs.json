@@ -3,210 +3,540 @@
     "table_name": "portfolio_holdings",
     "schema_name": "ai_trading",
     "column_name": "datetime",
-    "documentation": "The exact timestamp of the data snapshot. Essential for historical analysis. Data Type: timestamp."
+    "documentation": "The exact timestamp of the data snapshot. Essential for historical analysis. Data Type: timestamp.",
+    "semantic_keywords": ["date", "time", "when", "snapshot", "historical", "trend"],
+    "question_patterns": ["When was this data captured?", "Show historical data"],
+    "aliases": ["timestamp", "date"],
+    "semantic_category": "temporal"
   },
   {
     "table_name": "portfolio_holdings",
     "schema_name": "ai_trading",
     "column_name": "positions",
-    "documentation": "The number of shares held. Data Type: numeric."
+    "documentation": "The number of shares held. Data Type: numeric.",
+    "semantic_keywords": ["shares", "quantity", "how many", "position size", "units", "holdings count"],
+    "question_patterns": ["How many shares do I have?", "What is my position in X?", "How many units?"],
+    "aliases": ["shares", "quantity", "units"],
+    "semantic_category": "positions"
   },
   {
     "table_name": "portfolio_holdings",
     "schema_name": "ai_trading",
     "column_name": "market_value",
-    "documentation": "The total market value of the positions at that datetime. Data Type: numeric."
+    "documentation": "The total market value of the positions at that datetime. Data Type: numeric.",
+    "semantic_keywords": ["value", "worth", "market value", "current value", "dollar value"],
+    "question_patterns": ["What is the value of my X holdings?", "How much is X worth?"],
+    "aliases": ["value", "worth", "mv"],
+    "semantic_category": "value"
   },
   {
     "table_name": "portfolio_holdings",
     "schema_name": "ai_trading",
     "column_name": "ytd_unrealized_pl",
-    "documentation": "Year-To-Date unrealized (on paper) profit or loss. Data Type: numeric."
+    "documentation": "Year-To-Date unrealized (on paper) profit or loss. Data Type: numeric.",
+    "semantic_keywords": ["unrealized", "paper profit", "paper loss", "ytd profit", "unrealized gain"],
+    "question_patterns": ["What is my unrealized profit?", "How much paper gain on X?"],
+    "aliases": ["unrealized_pl", "paper_profit"],
+    "semantic_category": "profit_loss"
   },
   {
     "table_name": "portfolio_holdings",
     "schema_name": "ai_trading",
     "column_name": "created_timestamp",
-    "documentation": "Timestamp when the record was created. Data Type: timestamp."
+    "documentation": "Timestamp when the record was created. Data Type: timestamp.",
+    "semantic_keywords": ["created", "added", "first added", "when added", "inception"],
+    "question_patterns": ["When was this holding added?", "When did I buy this?"],
+    "aliases": ["created_date", "add_date"],
+    "semantic_category": "temporal"
   },
   {
     "table_name": "portfolio_holdings",
     "schema_name": "ai_trading",
     "column_name": "updated_timestamp",
-    "documentation": "Timestamp when the record was last updated. Data Type: timestamp."
+    "documentation": "Timestamp when the record was last updated. Data Type: timestamp.",
+    "semantic_keywords": ["updated", "modified", "last changed"],
+    "question_patterns": ["When was this last updated?"],
+    "aliases": ["update_date", "modified_date"],
+    "semantic_category": "temporal"
   },
   {
     "table_name": "portfolio_holdings",
     "schema_name": "ai_trading",
     "column_name": "last_updated_time",
-    "documentation": "A more granular timestamp of the last modification. Data Type: timestamp."
+    "documentation": "A more granular timestamp of the last modification. Data Type: timestamp.",
+    "semantic_keywords": ["last update", "refresh time", "data freshness"],
+    "question_patterns": ["How fresh is this data?", "When was the last refresh?"],
+    "aliases": ["refresh_time", "last_refresh"],
+    "semantic_category": "temporal"
   },
   {
     "table_name": "portfolio_holdings_realized_pnl",
     "schema_name": "ai_trading",
     "column_name": "datetime",
-    "documentation": "The date for which the P&L data is recorded. Data Type: timestamp."
+    "documentation": "The date for which the P&L data is recorded. Data Type: timestamp.",
+    "semantic_keywords": ["date", "time", "when", "p&l date"],
+    "question_patterns": ["What date is this P&L for?"],
+    "aliases": ["timestamp", "pnl_date"],
+    "semantic_category": "temporal"
   },
   {
     "table_name": "portfolio_holdings_realized_pnl",
     "schema_name": "ai_trading",
     "column_name": "portfolio_name",
-    "documentation": "The name of the investment portfolio. Data Type: character varying."
+    "documentation": "The name of the investment portfolio. Data Type: character varying.",
+    "semantic_keywords": ["portfolio", "wallet", "fund", "account name"],
+    "question_patterns": ["Which portfolio?", "For which fund?"],
+    "aliases": ["portfolio", "fund_name", "wallet_name"],
+    "semantic_category": "identity"
   },
   {
     "table_name": "portfolio_holdings_realized_pnl",
     "schema_name": "ai_trading",
     "column_name": "symbol",
-    "documentation": "The stock ticker symbol. Data Type: character varying."
+    "documentation": "The stock ticker symbol. Data Type: character varying.",
+    "semantic_keywords": ["stock", "ticker", "symbol", "asset", "security"],
+    "question_patterns": ["Which stock?", "What symbol?", "What ticker?"],
+    "aliases": ["ticker", "stock_symbol", "asset_name"],
+    "semantic_category": "identity"
   },
   {
     "table_name": "portfolio_holdings_realized_pnl",
     "schema_name": "ai_trading",
     "column_name": "positions",
-    "documentation": "Number of shares held. Data Type: numeric."
+    "documentation": "Number of shares held. Data Type: numeric.",
+    "semantic_keywords": ["shares", "quantity", "holdings", "position"],
+    "question_patterns": ["How many shares?", "What is my position?"],
+    "aliases": ["shares", "quantity"],
+    "semantic_category": "positions"
   },
   {
     "table_name": "portfolio_holdings_realized_pnl",
     "schema_name": "ai_trading",
     "column_name": "market_value",
-    "documentation": "Total market value of the holding. Data Type: numeric."
+    "documentation": "Total market value of the holding. Data Type: numeric.",
+    "semantic_keywords": ["value", "worth", "market value", "current value"],
+    "question_patterns": ["What is it worth?", "Current value?"],
+    "aliases": ["value", "mv"],
+    "semantic_category": "value"
   },
   {
     "table_name": "portfolio_holdings_realized_pnl",
     "schema_name": "ai_trading",
     "column_name": "ytd_unrealized_pnl",
-    "documentation": "Year-To-Date unrealized (paper) profit or loss. Data Type: numeric."
+    "documentation": "Year-To-Date unrealized (paper) profit or loss. Data Type: numeric.",
+    "semantic_keywords": ["unrealized", "paper profit", "paper loss", "unrealized pnl", "paper gain"],
+    "question_patterns": ["What is my unrealized P&L?", "Paper profit?"],
+    "aliases": ["unrealized_profit", "paper_pnl"],
+    "semantic_category": "profit_loss"
   },
   {
     "table_name": "portfolio_holdings_realized_pnl",
     "schema_name": "ai_trading",
     "column_name": "ytd_realized_pnl",
-    "documentation": "Year-To-Date realized (locked-in) profit or loss from sold positions. Data Type: numeric."
+    "documentation": "Year-To-Date realized (locked-in) profit or loss from sold positions. Data Type: numeric.",
+    "semantic_keywords": ["realized", "locked in", "actual profit", "sold", "closed", "realized gain"],
+    "question_patterns": ["What is my realized P&L?", "Profit from sales?", "Locked in gains?"],
+    "aliases": ["realized_profit", "actual_pnl", "sold_profit"],
+    "semantic_category": "profit_loss"
   },
   {
     "table_name": "portfolio_holdings_realized_pnl",
     "schema_name": "ai_trading",
     "column_name": "ytd_total_pnl",
-    "documentation": "The sum of realized and unrealized P&L for the year. Best metric for overall profitability. Data Type: numeric."
+    "documentation": "The sum of realized and unrealized P&L for the year. Best metric for overall profitability. Data Type: numeric.",
+    "semantic_keywords": ["total profit", "total loss", "total pnl", "overall profit", "profitable", "most profitable", "top stock", "best stock", "worst stock"],
+    "question_patterns": ["What is total P&L?", "Most profitable stock?", "Best performing stock?", "Top gainers?"],
+    "aliases": ["total_profit", "pnl", "profit"],
+    "semantic_category": "profit_loss"
   },
   {
     "table_name": "portfolio_holdings_realized_pnl",
     "schema_name": "ai_trading",
     "column_name": "created_timestamp",
-    "documentation": "Timestamp when this record was created. Data Type: timestamp."
+    "documentation": "Timestamp when this record was created. Data Type: timestamp.",
+    "semantic_keywords": ["created", "added"],
+    "question_patterns": ["When was this record created?"],
+    "aliases": ["created_date"],
+    "semantic_category": "temporal"
   },
   {
     "table_name": "portfolio_holdings_realized_pnl",
     "schema_name": "ai_trading",
     "column_name": "daily_realized_pnl",
-    "documentation": "Profit or loss realized on this specific day. Data Type: numeric."
+    "documentation": "Profit or loss realized on this specific day. Data Type: numeric.",
+    "semantic_keywords": ["daily", "today", "daily profit", "today profit", "just realized"],
+    "question_patterns": ["What profit did I realize today?", "Daily P&L?"],
+    "aliases": ["today_pnl", "daily_profit"],
+    "semantic_category": "profit_loss"
+  },
+  {
+    "table_name": "portfolio_holdings_realized_pnl",
+    "schema_name": "ai_trading",
+    "column_name": "group_name",
+    "documentation": "The Portfolio Group this record belongs to (e.g., 'Sadeem-15M'). Data Type: character varying.",
+    "semantic_keywords": ["group", "portfolio group", "fund group"],
+    "question_patterns": ["Which group is this in?", "Group performance?"],
+    "aliases": ["portfolio_group"],
+    "semantic_category": "identity"
   },
   {
     "table_name": "portfolio_summary",
     "schema_name": "ai_trading",
     "column_name": "datetime",
-    "documentation": "The date for which the summary is calculated. Use MAX(datetime) to get the latest data. Data Type: timestamp."
+    "documentation": "The date for which the summary is calculated. Use MAX(datetime) to get the latest data. Data Type: timestamp.",
+    "semantic_keywords": ["date", "time", "snapshot", "as of"],
+    "question_patterns": ["As of what date?", "Latest snapshot?"],
+    "aliases": ["snapshot_date", "as_of_date"],
+    "semantic_category": "temporal"
   },
   {
     "table_name": "portfolio_summary",
     "schema_name": "ai_trading",
     "column_name": "portfolio_name",
-    "documentation": "The unique name of the investment portfolio. Data Type: character varying."
+    "documentation": "The unique name of the investment portfolio. Data Type: character varying.",
+    "semantic_keywords": ["portfolio", "wallet", "fund", "account"],
+    "question_patterns": ["Which portfolio?", "What fund?", "Portfolio name?"],
+    "aliases": ["portfolio", "fund", "wallet"],
+    "semantic_category": "identity"
   },
   {
     "table_name": "portfolio_summary",
     "schema_name": "ai_trading",
     "column_name": "net_liquidity",
-    "documentation": "The total current value of the portfolio (cash + holdings). Data Type: numeric."
+    "documentation": "The total current value of the portfolio (cash + holdings). Data Type: numeric.",
+    "semantic_keywords": ["net liquidity", "total value", "portfolio value", "aum", "balance", "worth", "assets under management"],
+    "question_patterns": ["What is my portfolio worth?", "Total AUM?", "Net liquidity?", "Portfolio balance?"],
+    "aliases": ["total_value", "portfolio_value", "aum", "balance"],
+    "semantic_category": "value"
   },
   {
     "table_name": "portfolio_summary",
     "schema_name": "ai_trading",
     "column_name": "ytd_return",
-    "documentation": "The Year-To-Date return of the portfolio as a percentage. Data Type: numeric."
+    "documentation": "The Year-To-Date return of the portfolio as a percentage. Data Type: numeric.",
+    "semantic_keywords": ["ytd", "year to date", "this year", "yearly return", "ytd performance", "annual return"],
+    "question_patterns": ["What is YTD return?", "How is the portfolio doing this year?", "Year to date performance?"],
+    "aliases": ["ytd_performance", "year_return", "annual_return"],
+    "semantic_category": "returns"
   },
   {
     "table_name": "portfolio_summary",
     "schema_name": "ai_trading",
     "column_name": "all_return",
-    "documentation": "The total return of the portfolio since its inception as a percentage. Data Type: numeric."
+    "documentation": "The total return of the portfolio since its inception as a percentage. Data Type: numeric.",
+    "semantic_keywords": ["all time", "all-time", "since inception", "total return", "lifetime", "overall return"],
+    "question_patterns": ["What is my all-time return?", "Return since inception?", "Total return ever?"],
+    "aliases": ["total_return", "lifetime_return", "inception_return"],
+    "semantic_category": "returns"
   },
   {
     "table_name": "portfolio_summary",
     "schema_name": "ai_trading",
     "column_name": "all_profit",
-    "documentation": "The total profit of the portfolio since its inception in absolute monetary terms. Data Type: numeric."
+    "documentation": "The total profit of the portfolio since its inception in absolute monetary terms. Data Type: numeric.",
+    "semantic_keywords": ["all time profit", "total profit", "lifetime profit", "overall profit"],
+    "question_patterns": ["What is my total profit ever?", "All-time profit?"],
+    "aliases": ["total_profit", "lifetime_profit"],
+    "semantic_category": "profit_loss"
   },
   {
     "table_name": "portfolio_summary",
     "schema_name": "ai_trading",
     "column_name": "allocated_amount",
-    "documentation": "The total capital allocated to this portfolio. Data Type: numeric."
+    "documentation": "The total capital allocated to this portfolio. Data Type: numeric.\n    **CRITICAL**: When asked for 'total investment amount' or 'total capital allocated', you MUST use this column.\n    The column name is `allocated_amount`. Do NOT use `total_capital_allocated`.",
+    "semantic_keywords": ["allocated", "capital", "investment", "funding", "initial investment"],
+    "question_patterns": ["How much capital is allocated?", "Total investment?", "Initial funding?"],
+    "aliases": ["capital", "investment", "funding"],
+    "semantic_category": "value"
   },
   {
     "table_name": "portfolio_summary",
     "schema_name": "ai_trading",
     "column_name": "mtd_return",
-    "documentation": "The Month-To-Date return as a percentage. Data Type: numeric."
+    "documentation": "The Month-To-Date return as a percentage. Data Type: numeric.",
+    "semantic_keywords": ["mtd", "month to date", "this month", "monthly return", "mtd performance"],
+    "question_patterns": ["What is MTD return?", "How did I do this month?", "Monthly performance?"],
+    "aliases": ["month_return", "monthly_return"],
+    "semantic_category": "returns"
   },
   {
     "table_name": "portfolio_summary",
     "schema_name": "ai_trading",
     "column_name": "qtd_return",
-    "documentation": "The Quarter-To-Date return as a percentage. Data Type: numeric."
+    "documentation": "The Quarter-To-Date return as a percentage. Data Type: numeric.",
+    "semantic_keywords": ["qtd", "quarter to date", "this quarter", "quarterly return", "qtd performance"],
+    "question_patterns": ["What is QTD return?", "Quarterly performance?", "This quarter's return?"],
+    "aliases": ["quarter_return", "quarterly_return"],
+    "semantic_category": "returns"
   },
   {
     "table_name": "portfolio_summary",
     "schema_name": "ai_trading",
     "column_name": "daily_return",
-    "documentation": "The daily return as a percentage. Data Type: numeric."
+    "documentation": "The daily return as a percentage. Data Type: numeric.",
+    "semantic_keywords": ["daily", "today", "today's return", "daily performance"],
+    "question_patterns": ["What is today's return?", "Daily performance?", "How did I do today?"],
+    "aliases": ["today_return", "todays_return"],
+    "semantic_category": "returns"
   },
   {
     "table_name": "portfolio_summary",
     "schema_name": "ai_trading",
     "column_name": "utilized_amount",
-    "documentation": "The amount of the allocated capital that is currently invested. \n    **Hint**: To find 'funds available for new investments' or 'unutilized capital', you must calculate the difference: (`allocated_amount` - `utilized_amount`).\n    Data Type: numeric."
+    "documentation": "The amount of the allocated capital that is currently invested.\n    **Hint**: To find 'funds available for new investments' or 'unutilized capital', you must calculate the difference: (`allocated_amount` - `utilized_amount`).\n    Data Type: numeric.",
+    "semantic_keywords": ["utilized", "invested", "deployed", "in use", "active capital"],
+    "question_patterns": ["How much is invested?", "Capital deployed?", "Utilization?"],
+    "aliases": ["invested_amount", "deployed_capital"],
+    "semantic_category": "value"
   },
   {
     "table_name": "portfolio_summary",
     "schema_name": "ai_trading",
     "column_name": "group_name",
-    "documentation": "A category the portfolio belongs to (e.g., 'Balanced', 'Aggressive').\n    **Hint**: To compare performance across groups, you should GROUP BY this column and calculate aggregate metrics like AVG(ytd_return), SUM(ytd_profit), and COUNT(portfolio_name).\n    Data Type: character varying."
+    "documentation": "A category the portfolio belongs to (e.g., 'Balanced', 'Aggressive').\n    **Hint**: To compare performance across groups, you should GROUP BY this column and calculate aggregate metrics like AVG(ytd_return), SUM(ytd_profit), and COUNT(portfolio_name).\n    Data Type: character varying.",
+    "semantic_keywords": ["group", "category", "portfolio group", "classification", "aggressive", "conservative", "balanced"],
+    "question_patterns": ["Which group is this portfolio in?", "Compare groups?", "Performance by group?"],
+    "aliases": ["portfolio_group", "category", "classification"],
+    "semantic_category": "identity"
   },
   {
     "table_name": "portfolio_summary",
     "schema_name": "ai_trading",
     "column_name": "last_updated_time",
-    "documentation": "The precise timestamp of the last data update for the portfolio summary.\n    **CRITICAL**: This column is named `last_updated_time`. When asked for the 'last update' or 'latest update time', you MUST use this column. \n    Do NOT use `last_updated` or `updated_at` for this table.\n    Data Type: timestamp without time zone."
-  },
-  {
-    "table_name": "portfolio_summary",
-    "schema_name": "ai_trading",
-    "column_name": "allocated_amount",
-    "documentation": "The total capital allocated to this portfolio. \n    **CRITICAL**: When asked for 'total investment amount' or 'total capital allocated', you MUST use this column. \n    The column name is `allocated_amount`. Do NOT use `total_capital_allocated`.\n    Data Type: numeric."
+    "documentation": "The precise timestamp of the last data update for the portfolio summary.\n    **CRITICAL**: This column is named `last_updated_time`. When asked for the 'last update' or 'latest update time', you MUST use this column.\n    Do NOT use `last_updated` or `updated_at` for this table.\n    Data Type: timestamp without time zone.",
+    "semantic_keywords": ["last update", "refresh", "data freshness", "when updated"],
+    "question_patterns": ["When was data last updated?", "Data freshness?", "Last refresh time?"],
+    "aliases": ["update_time", "refresh_time"],
+    "semantic_category": "temporal"
   },
   {
     "table_name": "portfolio_summary",
     "schema_name": "ai_trading",
     "column_name": "portfolio_description",
-    "documentation": "This column contains a text description of the portfolio's strategy.\n    **CRITICAL**: The column name is `portfolio_description`. \n    When asked for a portfolio's 'description' or 'strategy', you MUST use this column. \n    Do NOT use a column named `strategy`.\n    Data Type: character varying."
-  },
-  {
-    "table_name": "portfolio_summary",
-    "schema_name": "ai_trading",
-    "column_name": "all_return",
-    "documentation": "The total return of the portfolio since its inception, as a percentage.\n    **CRITICAL**: This column is named `all_return`. When a user asks for 'total return', 'all-time return', or 'return since inception', you MUST use the `all_return` column.\n    Do NOT use a column named `total_return`.\n    Data Type: numeric."
+    "documentation": "This column contains a text description of the portfolio's strategy.\n    **CRITICAL**: The column name is `portfolio_description`.\n    When asked for a portfolio's 'description' or 'strategy', you MUST use this column.\n    Do NOT use a column named `strategy`.\n    Data Type: character varying.",
+    "semantic_keywords": ["description", "strategy", "investment strategy", "about", "details"],
+    "question_patterns": ["What is the portfolio strategy?", "Describe this portfolio?", "Investment approach?"],
+    "aliases": ["strategy", "description", "about"],
+    "semantic_category": "identity"
   },
   {
     "table_name": "portfolio_summary",
     "schema_name": "ai_trading",
     "column_name": "portfolio_startdate",
-    "documentation": "The inception date of the portfolio (when it was created).\n    **CRITICAL**: This column is named `portfolio_startdate`. When asked about 'new portfolios', their 'inception date', or 'creation date', you MUST use this column.\n    Do NOT use a column named `inception_date`.\n    Data Type: date."
+    "documentation": "The inception date of the portfolio (when it was created).\n    **CRITICAL**: This column is named `portfolio_startdate`. When asked about 'new portfolios', their 'inception date', or 'creation date', you MUST use this column.\n    Do NOT use a column named `inception_date`.\n    Data Type: date.",
+    "semantic_keywords": ["start date", "inception", "created", "when started", "creation date"],
+    "question_patterns": ["When was this portfolio created?", "Inception date?", "Start date?"],
+    "aliases": ["inception_date", "start_date", "created_date"],
+    "semantic_category": "temporal"
   },
   {
     "table_name": "portfolio_summary",
     "schema_name": "ai_trading",
     "column_name": "cost_model",
-    "documentation": "The cost basis accounting method used (e.g., 'FIFO').\n    **CRITICAL**: This column is named `cost_model`. When asked about the 'cost model', 'cost basis', or 'accounting method', you MUST use this column.\n    Do NOT use a column named `cost_basis_method`.\n    Data Type: character varying."
+    "documentation": "The cost basis accounting method used (e.g., 'FIFO').\n    **CRITICAL**: This column is named `cost_model`. When asked about the 'cost model', 'cost basis', or 'accounting method', you MUST use this column.\n    Do NOT use a column named `cost_basis_method`.\n    Data Type: character varying.",
+    "semantic_keywords": ["cost model", "cost basis", "accounting", "fifo", "lifo", "average cost"],
+    "question_patterns": ["What cost model is used?", "Cost basis method?", "Accounting approach?"],
+    "aliases": ["cost_basis", "accounting_method"],
+    "semantic_category": "identity"
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "default_index",
+    "documentation": "The benchmark index for this portfolio (e.g., 'S&P 500', 'QQQ', 'DJI'). Use for benchmark comparison questions.",
+    "semantic_keywords": ["benchmark", "index", "compare to", "s&p", "nasdaq", "default index", "reference"],
+    "question_patterns": ["What is the benchmark?", "Default index?", "What index to compare against?"],
+    "aliases": ["benchmark", "index", "reference_index"],
+    "semantic_category": "benchmark"
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "ytd_index_return",
+    "documentation": "Year-To-Date return of the default benchmark index. Compare with ytd_return for outperformance analysis.",
+    "semantic_keywords": ["benchmark return", "index return", "ytd benchmark", "market return", "s&p return"],
+    "question_patterns": ["How did the benchmark do YTD?", "Index return?", "Market performance?"],
+    "aliases": ["benchmark_ytd", "market_return"],
+    "semantic_category": "benchmark"
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "mtd_index_return",
+    "documentation": "Month-To-Date return of the default benchmark index.",
+    "semantic_keywords": ["benchmark mtd", "index mtd", "monthly benchmark"],
+    "question_patterns": ["How did benchmark do this month?"],
+    "aliases": ["benchmark_mtd"],
+    "semantic_category": "benchmark"
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "qtd_index_return",
+    "documentation": "Quarter-To-Date return of the default benchmark index.",
+    "semantic_keywords": ["benchmark qtd", "index qtd", "quarterly benchmark"],
+    "question_patterns": ["How did benchmark do this quarter?"],
+    "aliases": ["benchmark_qtd"],
+    "semantic_category": "benchmark"
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "daily_index_return",
+    "documentation": "Today's return of the default benchmark index.",
+    "semantic_keywords": ["benchmark today", "index today", "daily benchmark"],
+    "question_patterns": ["How did benchmark do today?"],
+    "aliases": ["benchmark_daily"],
+    "semantic_category": "benchmark"
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "all_index_return",
+    "documentation": "All-time return of the default benchmark index since portfolio inception.",
+    "semantic_keywords": ["benchmark all time", "total benchmark return", "index since inception"],
+    "question_patterns": ["How did benchmark do since inception?", "All-time index return?"],
+    "aliases": ["benchmark_total", "index_all_time"],
+    "semantic_category": "benchmark"
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "unrealized_pl",
+    "documentation": "Total unrealized profit/loss across all holdings in this portfolio.",
+    "semantic_keywords": ["unrealized", "paper profit", "paper loss", "unrealized pnl"],
+    "question_patterns": ["What is unrealized P&L?", "Paper profit?"],
+    "aliases": ["unrealized_profit", "paper_pnl"],
+    "semantic_category": "profit_loss"
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "is_active",
+    "documentation": "Status flag (1 = Active, 0 = Inactive). Always filter by is_active = 1 for active portfolios.",
+    "semantic_keywords": ["active", "inactive", "status", "enabled"],
+    "question_patterns": ["Is this portfolio active?", "Active portfolios only?"],
+    "aliases": ["status", "enabled"],
+    "semantic_category": "status"
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "account_id",
+    "documentation": "Unique account identifier for the portfolio.",
+    "semantic_keywords": ["account", "account id", "account number"],
+    "question_patterns": ["What is the account ID?", "Account number?"],
+    "aliases": ["account_number"],
+    "semantic_category": "identity"
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "user_id",
+    "documentation": "User identifier who owns this portfolio.",
+    "semantic_keywords": ["user", "owner", "user id"],
+    "question_patterns": ["Who owns this portfolio?", "User ID?"],
+    "aliases": ["owner_id"],
+    "semantic_category": "identity"
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "daily_profit",
+    "documentation": "Profit or loss for today in absolute terms.",
+    "semantic_keywords": ["daily profit", "today profit", "daily gain"],
+    "question_patterns": ["What is today's profit?", "Daily P&L?"],
+    "aliases": ["today_profit"],
+    "semantic_category": "profit_loss"
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "wtd_return",
+    "documentation": "Week-To-Date return as a percentage.",
+    "semantic_keywords": ["wtd", "week to date", "this week", "weekly return"],
+    "question_patterns": ["What is WTD return?", "Weekly performance?"],
+    "aliases": ["week_return", "weekly_return"],
+    "semantic_category": "returns"
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "wtd_profit",
+    "documentation": "Week-To-Date profit in absolute terms.",
+    "semantic_keywords": ["wtd profit", "weekly profit", "this week profit"],
+    "question_patterns": ["What is WTD profit?", "Weekly profit?"],
+    "aliases": ["week_profit"],
+    "semantic_category": "profit_loss"
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "mtd_profit",
+    "documentation": "Month-To-Date profit in absolute terms.",
+    "semantic_keywords": ["mtd profit", "monthly profit", "this month profit"],
+    "question_patterns": ["What is MTD profit?", "Monthly profit?"],
+    "aliases": ["month_profit"],
+    "semantic_category": "profit_loss"
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "qtd_profit",
+    "documentation": "Quarter-To-Date profit in absolute terms.",
+    "semantic_keywords": ["qtd profit", "quarterly profit", "this quarter profit"],
+    "question_patterns": ["What is QTD profit?", "Quarterly profit?"],
+    "aliases": ["quarter_profit"],
+    "semantic_category": "profit_loss"
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "ytd_profit",
+    "documentation": "Year-To-Date profit in absolute terms.",
+    "semantic_keywords": ["ytd profit", "yearly profit", "this year profit", "annual profit"],
+    "question_patterns": ["What is YTD profit?", "Yearly profit?"],
+    "aliases": ["year_profit", "annual_profit"],
+    "semantic_category": "profit_loss"
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "wtd_index_return",
+    "documentation": "Week-To-Date return of the default benchmark index.",
+    "semantic_keywords": ["benchmark wtd", "weekly index return"],
+    "question_patterns": ["How did benchmark do this week?"],
+    "aliases": ["benchmark_wtd"],
+    "semantic_category": "benchmark"
+  },
+  {
+    "table_name": "portfolio_summary",
+    "schema_name": "ai_trading",
+    "column_name": "index_annual_return",
+    "documentation": "Annualized return of the default benchmark index.",
+    "semantic_keywords": ["annual index return", "yearly benchmark", "annualized benchmark"],
+    "question_patterns": ["What is the annualized benchmark return?"],
+    "aliases": ["benchmark_annual"],
+    "semantic_category": "benchmark"
+  },
+  {
+    "table_name": "portfolio_holdings",
+    "schema_name": "ai_trading",
+    "column_name": "portfolio_name",
+    "documentation": "The name of the portfolio that holds this position.",
+    "semantic_keywords": ["portfolio", "wallet", "fund"],
+    "question_patterns": ["Which portfolio holds this?"],
+    "aliases": ["portfolio", "fund"],
+    "semantic_category": "identity"
+  },
+  {
+    "table_name": "portfolio_holdings",
+    "schema_name": "ai_trading",
+    "column_name": "symbol",
+    "documentation": "The stock ticker symbol of the holding.",
+    "semantic_keywords": ["stock", "ticker", "symbol", "asset"],
+    "question_patterns": ["What stock is this?", "Which symbol?"],
+    "aliases": ["ticker", "stock"],
+    "semantic_category": "identity"
   }
 ]

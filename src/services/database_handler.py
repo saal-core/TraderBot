@@ -20,6 +20,10 @@ load_dotenv()
 # TOON formatter for token-efficient data formatting
 from src.utils.toon_formatter import format_query_results, format_symbol_list
 
+# SGAM Services
+from src.services.schema_graph import get_table_for_query
+from src.services.query_decomposer import get_query_analysis
+
 
 class DatabaseQueryHandler:
     """Handles database-related queries by generating SQL using custom prompt"""
@@ -56,7 +60,14 @@ class DatabaseQueryHandler:
 
         # Create prompt template with dynamic data including conversation history and portfolio context
         self.sql_prompt = PromptTemplate(
-            input_variables=["query", "matched_symbols", "conversation_history", "portfolio_context"],
+            input_variables=[
+                "query", 
+                "matched_symbols", 
+                "conversation_history", 
+                "portfolio_context",
+                "table_recommendation", 
+                "query_analysis"
+            ],
             template=self.custom_prompt_template
         )
 
@@ -352,14 +363,25 @@ class DatabaseQueryHandler:
         # Get portfolio context for better SQL generation
         portfolio_context = self._get_portfolio_context()
 
+        # SGAM Integration: Query Analysis & Table Recommendation
+        print(f"🧠 SGAM: Analyzing query structure...")
+        query_analysis = get_query_analysis(query)
+        
+        table_name, reason = get_table_for_query(query)
+        table_recommendation = f"Recommended Table: ai_trading.{table_name}\nReason: {reason}"
+        print(f"  → {table_recommendation}")
+
         # Generate SQL
         start_time = time.time()
         print(f"⏱️  SQL Query Generation...")
 
+        # Invoke chain with all context
         sql = self.sql_chain.invoke({
             "matched_symbols": matched_symbols,
             "conversation_history": conversation_text,
             "portfolio_context": portfolio_context,
+            "table_recommendation": table_recommendation,
+            "query_analysis": query_analysis,
             "query": query
         })
 
@@ -392,6 +414,11 @@ class DatabaseQueryHandler:
         """
         from src.services.unified_response_generator import get_response_generator
         
+        # Truncate large result sets to prevent token overflow
+        if results_df is not None and not results_df.empty and len(results_df) > 50:
+            print(f"⚠️ Large Result Set: {len(results_df)} rows. Truncating to top 50 for explanation context.")
+            results_df = results_df.head(50)
+
         results_text = format_query_results(results_df) if results_df is not None and not results_df.empty else "No results found"
 
         try:
@@ -434,6 +461,11 @@ class DatabaseQueryHandler:
         """
         from src.services.unified_response_generator import get_response_generator
         
+        # Truncate large result sets to prevent token overflow
+        if results_df is not None and not results_df.empty and len(results_df) > 50:
+            print(f"⚠️ Large Result Set: {len(results_df)} rows. Truncating to top 50 for explanation context.")
+            results_df = results_df.head(50)
+
         # Use TOON format for token-efficient results representation
         results_text = format_query_results(results_df) if results_df is not None and not results_df.empty else "No results found"
 
