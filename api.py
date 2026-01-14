@@ -132,6 +132,7 @@ def convert_chat_history(messages: List[ChatMessage]) -> List[Dict[str, str]]:
             "content": msg.content,
             "timestamp": serialize_value(msg.timestamp),
             "sql_query": msg.sql_query,
+            "results": msg.results,  # Include results for follow-up question context
             "query_type": msg.query_type
         }
         for msg in messages

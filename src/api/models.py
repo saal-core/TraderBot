@@ -16,6 +16,7 @@ class ChatMessage(BaseModel):
     content: str = Field(..., description="Message content")
     timestamp: Optional[str] = Field(None, description="Message timestamp")
     sql_query: Optional[str] = Field(None, description="SQL query if applicable")
+    results: Optional[List[Dict[str, Any]]] = Field(None, description="Query results for context in follow-up questions")
     query_type: Optional[str] = Field(None, description="Type of query")
 
 
