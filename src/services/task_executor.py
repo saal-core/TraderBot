@@ -152,7 +152,7 @@ class TaskExecutor:
                      generator = get_response_generator()
                      data = {"context": context_str}
                      
-                     yield self._format_event("content", "📊 **Analysis:**\n")
+                     # yield self._format_event("content", "📊 **Analysis:**\n")
                      
                      # Stream analysis using unified generator
                      for chunk in generator.stream_response(
@@ -161,6 +161,7 @@ class TaskExecutor:
                          data=data
                      ):
                          yield self._format_event("content", chunk)
+                         await asyncio.sleep(0)  # Force flush for real-time streaming
                            
                      step_result = "Analysis completed"
                      context[step_id] = step_result

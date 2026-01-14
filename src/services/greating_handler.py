@@ -4,6 +4,7 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from src.config.llm_provider import get_llm, get_active_provider, get_provider_config
 from src.services.chat_memory import ChatMemory
+from src.config.prompts import detect_language, ARABIC_FINANCIAL_GLOSSARY
 import os
 import time
 from rapidfuzz import fuzz, process
@@ -34,16 +35,33 @@ class GreetingHandler:
         print(f"✅ GreetingHandler initialized with {provider.upper()}: {self.model_name}")
 
         self.greeting_prompt = PromptTemplate(
-            input_variables=["query", "chat_history"],
-            template="""You are a friendly and helpful AI assistant for a text-to-SQL chatbot.
+            input_variables=["query", "chat_history", "language", "arabic_glossary"],
+            template="""You are a friendly and helpful AI financial assistant.
+
+**Response Language:** {language}
 
 Chat History:
 {chat_history}
 
 User: {query}
 
-Respond in a friendly and concise manner. Keep your response brief (1-3 sentences).
-If asked what you can do, mention that you can help query databases and answer questions about data.Assistant:"""
+Respond in a friendly and concise manner in {language}. Keep your response brief (1-3 sentences).
+If asked what you can do, mention that you can help query portfolios, financial databases, and answer questions about data.
+
+**HTML FORMATTING (CRITICAL - MUST FOLLOW):**
+- Generate your response as HTML, NOT markdown
+- Use <p> tags for paragraphs
+- NEVER use markdown syntax (no **, *, #, -)
+- **FOR ARABIC RESPONSES:** Wrap your ENTIRE response in: <div class="rtl-content">...</div>
+
+**CRITICAL FOR ARABIC RESPONSES:**
+- You MUST respond ENTIRELY in Arabic when the user's language is Arabic
+- DO NOT mix English words in Arabic responses
+- Wrap the entire response in: <div class="rtl-content">your content here</div>
+
+{arabic_glossary}
+
+Assistant (HTML only):"""
         )
 
         self.greeting_chain = self.greeting_prompt | self.llm | StrOutputParser()
@@ -63,6 +81,9 @@ If asked what you can do, mention that you can help query databases and answer q
             chat_history = []
 
         try:
+            # Detect language from user query
+            language = detect_language(query)
+            
             # Use ChatMemory to get relevant context
             context_messages = self.chat_memory.get_context_messages(chat_history)
             history_text = self.chat_memory.get_summary_text(chat_history)
@@ -70,12 +91,17 @@ If asked what you can do, mention that you can help query databases and answer q
             if not history_text or history_text == "No previous conversation.":
                 history_text = "This is the start of the conversation."
 
+            # Get Arabic glossary if responding in Arabic
+            arabic_glossary = ARABIC_FINANCIAL_GLOSSARY if language == "Arabic" else ""
+
             start_time = time.time()
-            print(f"⏱️  Starting: Greeting Response Generation...")
+            print(f"⏱️  Starting: Greeting Response Generation (Language: {language})...")
 
             response = self.greeting_chain.invoke({
                 "query": query,
-                "chat_history": history_text
+                "chat_history": history_text,
+                "language": language,
+                "arabic_glossary": arabic_glossary
             })
 
             elapsed = time.time() - start_time
@@ -85,5 +111,7 @@ If asked what you can do, mention that you can help query databases and answer q
 
         except Exception as e:
             print(f"❌ Error generating greeting response: {e}")
-            return "Hello! I'm here to help you query databases. How can I assist you?"
-
+            # Return Arabic fallback if the query was in Arabic
+            if detect_language(query) == "Arabic":
+                return '<div class="rtl-content"><p>مرحباً! أنا هنا لمساعدتك في استفسارات قاعدة البيانات. كيف يمكنني مساعدتك؟</p></div>'
+            return "<p>Hello! I'm here to help you query databases. How can I assist you?</p>"
