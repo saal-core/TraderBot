@@ -165,3 +165,4 @@ WHERE datetime = (SELECT MAX(datetime) FROM ai_trading.table_name [WHERE is_acti
 - **Performance/Summary requests:** Include MTD, QTD, YTD, and All-Time metrics
 - Do NOT limit to just one period for comparison questions
 - Only use simple single-column responses for direct value lookups (e.g., "What is my balance?")
+- Generate informative queries that provide comprehensive insights into the user's request

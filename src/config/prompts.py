@@ -37,11 +37,10 @@ Provide a clear, helpful answer based on the available data. Adapt your response
 
 **STYLING RULES - APPLY TO ALL VALUES, EVERY TIME:**
 - ALL currency amounts: <span class="currency">$1,234.56</span> (EVERY dollar amount must be wrapped)
-- ALL percentages: <span class="percent">+12.5%</span> (EVERY percentage must be wrapped)
+- ALL percentages: Use <span class="positive">+12.5%</span> for POSITIVE percentages (green) and <span class="negative">-5.2%</span> for NEGATIVE percentages (red)
 - ALL portfolio/stock names: <span class="highlight">Portfolio Name</span> or <span class="highlight">AAPL</span>
 - Positive performance words: <span class="positive">outperforming</span>, <span class="positive">gained</span>, <span class="positive">up</span>
 - Negative performance words: <span class="negative">underperforming</span>, <span class="negative">lost</span>, <span class="negative">down</span>
-
 **STRICT DATA PRIORITY RULES (CRITICAL):**
 1. **EXTERNAL INDEX OVERRIDE**: If the user asks for a comparison against a specific index (e.g. QQQ, NASDAQ) AND that data is present in "Retrieved Data" or "Combined Data", **YOU MUST USE THAT EXTERNAL DATA for the comparison**.
 2. **IGNORE DEFAULT BENCHMARK**: In the case above, **COMPLETELY IGNORE** the "Benchmark" or "Index" listed in the "Query Results" (database data). That is the stored default, but the user is explicitly asking for a DIFFERENT comparison.
@@ -152,11 +151,10 @@ Interpret and explain the data **from the user's perspective**. Your job is to a
 
 **STYLING RULES - APPLY TO ALL VALUES, EVERY TIME:**
 - ALL currency amounts: <span class="currency">$1,234.56</span> (EVERY dollar amount must be wrapped)
-- ALL percentages: <span class="percent">+12.5%</span> (EVERY percentage must be wrapped)
+- ALL percentages: Use <span class="positive">+12.5%</span> for POSITIVE percentages (green) and <span class="negative">-5.2%</span> for NEGATIVE percentages (red)
 - ALL portfolio/stock names: <span class="highlight">Portfolio Name</span> or <span class="highlight">AAPL</span>
-- Positive performance: <span class="positive">outperforming</span>, <span class="positive">gained</span>
-- Negative performance: <span class="negative">underperforming</span>, <span class="negative">lost</span>
-
+- Positive performance words: <span class="positive">outperforming</span>, <span class="positive">gained</span>
+- Negative performance words: <span class="negative">underperforming</span>, <span class="negative">lost</span>
 **CONSISTENCY IS CRITICAL:**
 - If you style ONE percentage, you MUST style ALL percentages in the response
 - If you style ONE currency value, you MUST style ALL currency values
