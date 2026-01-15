@@ -29,8 +29,8 @@ from src.services.llm_query_router import LLMQueryRouter
 from src.services.query_planner import QueryPlanner
 from src.services.task_executor import TaskExecutor
 from src.services.database_handler import DatabaseQueryHandler
-from src.services.greating_handler import GreetingHandler
 from src.services.internet_data_handler import InternetDataHandler
+from src.services.unified_response_generator import get_response_generator
 # ComparisonHandler removed - comparison queries now handled by QueryPlanner + TaskExecutor
 from src.services.chat_memory import ChatMemory
 from src.services.context_manager import ContextAwareManager
@@ -56,8 +56,6 @@ class AppState:
         self.planner: Optional[QueryPlanner] = None
         self.task_executor: Optional[TaskExecutor] = None
         self.db_handler: Optional[DatabaseQueryHandler] = None
-        self.greeting_handler: Optional[GreetingHandler] = None
-        self.greeting_handler: Optional[GreetingHandler] = None
         self.internet_data_handler: Optional[InternetDataHandler] = None
         self.context_manager: Optional[ContextAwareManager] = None
         # comparison_handler removed - now handled by planner/executor
@@ -192,7 +190,6 @@ async def initialize():
         
         app_state.router = LLMQueryRouter()
         app_state.db_handler = DatabaseQueryHandler(sql_executor=app_state.sql_executor)
-        app_state.greeting_handler = GreetingHandler()
         app_state.internet_data_handler = InternetDataHandler()
         app_state.chat_memory = ChatMemory(max_pairs=5)
         app_state.context_manager = ContextAwareManager()
@@ -394,7 +391,7 @@ async def process_internet_query_streaming(request: QueryRequest):
 
 @app.post("/query/greeting", response_model=QueryResponse)
 async def process_greeting(request: QueryRequest):
-    """Process a greeting or chitchat"""
+    """Process a greeting or chitchat using UnifiedResponseGenerator"""
     if not app_state.initialized:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -403,7 +400,14 @@ async def process_greeting(request: QueryRequest):
     
     try:
         chat_history = convert_chat_history(request.chat_history)
-        response = app_state.greeting_handler.respond(request.query, chat_history)
+        
+        # Use UnifiedResponseGenerator for greeting responses
+        generator = get_response_generator()
+        response = generator.generate_response(
+            query=request.query,
+            context_type="greeting",
+            chat_history=chat_history
+        )
         
         app_state.query_stats["greeting"] += 1
         cleaned_response = clean_response_content(response)
@@ -646,7 +650,13 @@ async def _stream_query_generator(query: str, chat_history: List[Dict[str, str]]
         query_type = app_state.router.classify_query(query, chat_history)
         
         if query_type == "greeting":
-            response = app_state.greeting_handler.respond(query, chat_history)
+            # Use UnifiedResponseGenerator for greeting responses
+            generator = get_response_generator()
+            response = generator.generate_response(
+                query=query,
+                context_type="greeting",
+                chat_history=chat_history
+            )
             cleaned_response = clean_response_content(response)
             yield generate_sse_event("content", cleaned_response)
         
