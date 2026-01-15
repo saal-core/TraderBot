@@ -25,19 +25,18 @@ flowchart TB
     end
 
     subgraph Handlers["📊 Data Handlers"]
-        DBHandler[Database Handler]
-        InternetHandler[Internet Data Handler]
-        GreetingHandler[Greeting Handler]
+        DBHandler[Database Handler<br/>SQL Generation]
+        InternetHandler[Internet Data Handler<br/>Market Data Fetch]
     end
 
     subgraph Response["💬 Response Generation"]
-        URG[Unified Response Generator]
+        URG[Unified Response Generator<br/>All Query Types<br/>database | internet | greeting | hybrid]
     end
 
     subgraph External["🌐 External"]
         DB[(PostgreSQL<br/>Portfolio Data)]
         FMP[FMP API<br/>Market Data]
-        LLM[LLM Provider<br/>Ollama/Qwen]
+        LLM[LLM Provider<br/>Ollama/Qwen/HuggingFace]
     end
 
     UI <-->|HTTP/SSE| API_Layer
@@ -46,9 +45,10 @@ flowchart TB
     Planner --> Executor
     Executor --> DBHandler
     Executor --> InternetHandler
-    API_Layer --> GreetingHandler
+    Router -->|greeting| URG
     DBHandler --> URG
     InternetHandler --> URG
+    Executor --> URG
     DBHandler --> DB
     DBHandler --> LLM
     InternetHandler --> FMP
@@ -85,7 +85,6 @@ flowchart TB
             AS_TaskExec[task_executor: TaskExecutor]
             AS_DBHandler[db_handler: DatabaseQueryHandler]
             AS_NetHandler[internet_data_handler]
-            AS_Greeting[greeting_handler]
             AS_Context[context_manager]
             AS_Memory[chat_memory]
         end
@@ -102,19 +101,19 @@ flowchart TB
     subgraph DataHandlers["📊 Data Handlers"]
         DBH[database_handler.py<br/>SQL Generation & Execution]
         IDH[internet_data_handler.py<br/>FMP API Integration]
-        GH[greeting_handler.py<br/>Conversational Responses]
     end
 
     subgraph ResponseGen["💬 Response Generation"]
-        URG[unified_response_generator.py<br/>Streaming HTML Responses]
+        URG[unified_response_generator.py<br/>Handles ALL Query Types<br/>database | internet | greeting | hybrid]
         Prompts[prompts.py<br/>Prompt Templates & Glossary]
         Cleaner[response_cleaner.py<br/>HTML Sanitization]
     end
 
     subgraph LLMLayer["🤖 LLM Provider (llm_provider.py)"]
-        LLMConfig[get_llm / get_streaming_llm]
-        OllamaLLM[Ollama]
+        LLMConfig[get_llm / get_streaming_llm<br/>Dynamic Provider Selection]
+        OllamaLLM[Ollama via OpenAI API]
         QwenLLM[Qwen H100]
+        HFLLM[HuggingFace API/Local]
     end
 
     subgraph DataSources["💾 Data Sources"]
@@ -127,17 +126,19 @@ flowchart TB
     StreamEndpoint --> LLMRouter
     LLMRouter -->|database| DBH
     LLMRouter -->|internet_data| IDH
-    LLMRouter -->|greeting| GH
+    LLMRouter -->|greeting| URG
     LLMRouter -->|hybrid| QPlanner
     QPlanner --> TExecutor
     TExecutor --> DBH
     TExecutor --> IDH
+    TExecutor --> URG
     DBH --> URG
     IDH --> URG
     URG --> Prompts
     URG --> LLMConfig
     LLMConfig --> OllamaLLM
     LLMConfig --> QwenLLM
+    LLMConfig --> HFLLM
     DBH --> PSQL
     IDH --> FMPAPI
     URG --> Cleaner
@@ -393,6 +394,24 @@ flowchart LR
 | **Task Executor** | `src/services/task_executor.py` | Plan execution with SSE |
 | **Database Handler** | `src/services/database_handler.py` | SQL generation & execution |
 | **Internet Handler** | `src/services/internet_data_handler.py` | FMP API integration |
-| **Response Generator** | `src/services/unified_response_generator.py` | Unified streaming responses |
+| **Response Generator** | `src/services/unified_response_generator.py` | **Single source for ALL responses** (database, internet, greeting, hybrid) |
+| **LLM Provider** | `src/config/llm_provider.py` | Dynamic LLM switching (Ollama/Qwen/HuggingFace) |
 | **Prompts** | `src/config/prompts.py` | All prompt templates & Arabic glossary |
 | **Frontend** | `main.py` | Streamlit chat UI with RTL support |
+
+---
+
+## Recent Architecture Changes (2026-01-15)
+
+### Removed Services (Redundant)
+
+- ❌ **`greating_handler.py`** (118 lines) - Replaced by `UnifiedResponseGenerator` with `context_type="greeting"`
+- ❌ **`qwen_explanation_service.py`** (175 lines) - LLM provider now handled dynamically via `llm_provider.py`
+- ❌ **`ollama_service.py`** - Legacy Ollama integration, replaced by OpenAI-compatible API in `llm_provider.py`
+
+### Key Improvements
+
+✅ **Unified Response Generation** - Single source of truth for all query types
+✅ **Dynamic LLM Switching** - Change providers via `LLM_PROVIDER` env variable
+✅ **Cleaner Architecture** - 293+ lines of redundant code removed
+✅ **Consistent Streaming** - All responses use same streaming mechanism
