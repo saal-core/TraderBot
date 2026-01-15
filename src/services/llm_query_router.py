@@ -30,6 +30,8 @@ LLM_ROUTER_PROMPT = """You are an expert query classifier for a financial portfo
    - YTD/MTD/QTD performance
    - Portfolio attributes (description, benchmark, cost model, default index)
    - Top/bottom performing stocks in their portfolio
+   - **Most profitable stocks, best/worst performing stocks by P&L**
+   - **Questions about profitability rankings, top 10 stocks, etc.**
    - **Portfolio vs S&P 500 (SPX)** (this benchmark is stored in database)
    - "Compare portfolio returns with S&P 500"
    - Any follow-up questions about previous database queries
@@ -39,8 +41,8 @@ LLM_ROUTER_PROMPT = """You are an expert query classifier for a financial portfo
    - Market news, trends, live indices
    - Hypothetical investments ("if I had invested...")
    - Crypto, forex, commodity prices
-   - Market movers on NASDAQ/NYSE
-   - Top gainers/losers in the market TODAY
+   - Market movers on NASDAQ/NYSE (NOT in portfolio)
+   - Top gainers/losers in the EXTERNAL market TODAY (not portfolio data)
 
 3. **hybrid** - Questions that need BOTH portfolio data AND LIVE market data:
    - "What are the top performing stocks today and how much do I have of each in my portfolio?"
