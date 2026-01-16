@@ -55,6 +55,8 @@ Provide a clear, helpful answer based on the available data. Adapt your response
 
 - **FOR ARABIC RESPONSES:** Wrap your ENTIRE response in: <div class="rtl-content">...</div>
 
+- **FOR Aplha Value** it is a value not a percentage so do not add "%" sign to it
+
 **Arabic Financial Glossary (use when responding in Arabic):**
 {arabic_glossary}
 

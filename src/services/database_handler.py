@@ -123,8 +123,8 @@ class DatabaseQueryHandler:
     def _summarize_results(self, results) -> str:
         """Create a compact summary of query results for context.
         
-        Extracts key identifiers (symbols, portfolio names) that can be referenced
-        in follow-up questions.
+        Extracts key identifiers (symbols, portfolio names, groups) that can be referenced
+        in follow-up questions. Provides structured metadata for better LLM reasoning.
         """
         try:
             if results is None:
@@ -139,20 +139,43 @@ class DatabaseQueryHandler:
                 summary_parts = []
                 summary_parts.append(f"{len(results)} rows")
                 
-                # Extract important identifiers
-                identifiers = []
-                for row in results[:10]:  # Limit to first 10 rows
+                # Extract distinct values for key identifier columns
+                portfolios = set()
+                symbols = set()
+                groups = set()
+                account_ids = set()
+                
+                for row in results:
                     if isinstance(row, dict):
-                        # Look for symbol, portfolio_name, or other key identifiers
-                        for key in ['symbol', 'portfolio_name', 'account_id']:
-                            if key in row and row[key]:
-                                identifiers.append(str(row[key]))
+                        # Collect distinct values for each key column
+                        if 'portfolio_name' in row and row['portfolio_name']:
+                            portfolios.add(str(row['portfolio_name']))
+                        if 'symbol' in row and row['symbol']:
+                            symbols.add(str(row['symbol']))
+                        if 'group_name' in row and row['group_name']:
+                            groups.add(str(row['group_name']))
+                        if 'account_id' in row and row['account_id']:
+                            account_ids.add(str(row['account_id']))
                 
-                if identifiers:
-                    unique_ids = list(dict.fromkeys(identifiers))[:8]  # First 8 unique
-                    summary_parts.append(f"includes: {', '.join(unique_ids)}")
+                # Build structured summary with distinct values
+                if portfolios:
+                    portfolio_list = sorted(list(portfolios))[:8]  # First 8 unique
+                    summary_parts.append(f"portfolios: {', '.join(portfolio_list)}")
                 
-                return "; ".join(summary_parts)
+                if groups:
+                    group_list = sorted(list(groups))[:5]  # First 5 unique
+                    summary_parts.append(f"groups: {', '.join(group_list)}")
+                
+                if symbols:
+                    symbol_list = sorted(list(symbols))[:10]  # First 10 unique
+                    summary_parts.append(f"symbols: {', '.join(symbol_list)}")
+                
+                if account_ids:
+                    account_list = sorted(list(account_ids))[:5]  # First 5 unique
+                    summary_parts.append(f"accounts: {', '.join(account_list)}")
+                
+                # Use pipe separator for better parsing
+                return " | ".join(summary_parts)
             
             return ""
         except Exception as e:
