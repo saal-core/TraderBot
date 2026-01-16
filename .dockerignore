@@ -1,0 +1,79 @@
+# =============================================================================
+# Docker Build Context Exclusions
+# =============================================================================
+
+# Python virtual environments
+my_env/
+venv/
+.venv/
+env/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.claude/
+
+# Environment files (will be mounted or passed separately)
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+tests/
+
+# Documentation
+docs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak
+*_old.py
+
+# PID files
+*.pid
+.api.pid
+.streamlit.pid
+
+# Local data files that shouldn't be in image
+*.csv
+*.sql
+ollama_models/
+examples/
+test_*.py
+
+# ChromaDB (will be mounted as volume)
+chroma.sqlite3
+vanna_chromadb_store/
+363558f4-5707-4e9d-8659-ae5f6b5d2f96/
+a5b846fc-2076-4b0a-98c6-71e7eb087f2a/
+
+# Scripts (not needed in container)
+scripts/
+
+# UV/Poetry files
+uv.lock

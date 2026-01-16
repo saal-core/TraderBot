@@ -1,0 +1,39 @@
+# =============================================================================
+# TraderBot Docker Compose Configuration
+# =============================================================================
+
+services:
+  traderbot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: traderbot
+    network_mode: host  # Allows access to host network (for QWEN at 192.168.71.72)
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Override API base URL for container networking
+      - API_BASE_URL=http://localhost:8001
+    volumes:
+      # Mount entire src for development (changes reflect without rebuild)
+      - ./src:/app/src
+      # Mount .env file
+      - ./.env:/app/.env:ro
+      # Persist logs
+      - ./logs:/app/logs
+      # Persist ChromaDB data (optional - for Vanna training persistence)
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    # Resource limits (adjust based on your deployment)
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 1G

@@ -14,12 +14,9 @@ Usage:
 
 import os
 import logging
-from typing import Literal, Dict, Any, Optional
-import torch
+from typing import Literal, Dict, Any, Optional, TYPE_CHECKING
 from langchain_openai import ChatOpenAI
-from langchain_huggingface import HuggingFacePipeline
-from transformers import BitsAndBytesConfig
-from src.config.settings import get_ollama_config, get_qwen_config, get_huggingface_config
+from src.config.settings import get_ollama_config, get_qwen_config
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -73,21 +70,6 @@ def get_provider_config() -> Dict[str, Any]:
             "temperature": float(config.get("temperature_sql", 0.2)),
             "config": config
         }
-    elif provider == "huggingface":
-        config = get_huggingface_config()
-        # Common config for both API and Local
-        base_config = {
-            "provider": "huggingface",
-            "model_name": config["model_name"],
-            "temperature": config["temperature"],
-            "type": config["type"], # api or local
-            "config": config
-        }
-        # Add API-specific fields only if type is api
-        if config["type"] == "api":
-            base_config["base_url"] = config["base_url"]
-            base_config["api_key"] = config["api_key"]
-        return base_config
     else:  # qwen
         config = get_qwen_config()
         return {
@@ -100,60 +82,6 @@ def get_provider_config() -> Dict[str, Any]:
             "extra_body": config.get("extra_body", {}),
             "config": config
         }
-
-
-def get_local_huggingface_llm(
-    temperature: Optional[float] = None,
-    max_tokens: Optional[int] = None,
-) -> HuggingFacePipeline:
-    """
-    Get a generic HuggingFace LLM loaded locally.
-    
-    Uses 4-bit quantization for efficiency.
-    
-    Args:
-        temperature: Override temperature
-        max_tokens: Max tokens to generate
-        
-    Returns:
-        HuggingFacePipeline instance
-    """
-    config = get_huggingface_config()
-    model_id = config["model_name"]
-    
-    print(f"🤗 Loading local model: {model_id} (this may take a while)...")
-    
-    # Quantization config (4-bit)
-    quantization_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_compute_dtype=torch.float16,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_use_double_quant=True,
-    )
-
-    # Pipeline arguments
-    pipeline_kwargs = {
-        "max_new_tokens": max_tokens if max_tokens is not None else config["max_tokens"],
-        "temperature": temperature if temperature is not None else config["temperature"],
-        "do_sample": True if (temperature if temperature is not None else config["temperature"]) > 0 else False,
-        "return_full_text": False,
-        "top_k": 10,
-    }
-
-    # Load model pipeline
-    llm = HuggingFacePipeline.from_model_id(
-        model_id=model_id,
-        task="text-generation",
-        device_map="auto",  # Uses Accelerate to map to GPU
-        pipeline_kwargs=pipeline_kwargs,
-        model_kwargs={
-            "quantization_config": quantization_config,
-            "trust_remote_code": True,
-        },
-    )
-    
-    print(f"✅ Local model loaded: {model_id}")
-    return llm
 
 
 def get_llm(

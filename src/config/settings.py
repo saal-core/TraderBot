@@ -131,25 +131,6 @@ def get_qwen_config() -> Dict[str, Any]:
     }
 
 
-def get_huggingface_config() -> Dict[str, Any]:
-    """
-    Get HuggingFace configuration as a dictionary (OpenAI-compatible API)
-    
-    Uses standard ChatOpenAI with HuggingFace's v1 router.
-    
-    Returns:
-        Dictionary containing HuggingFace configuration
-    """
-    return {
-        "api_key": os.getenv("HUGGINGFACEHUB_API_TOKEN"),
-        "model_name": os.getenv("HUGGINGFACE_MODEL"),
-        "base_url": "https://router.huggingface.co/v1/", #os.getenv("HUGGINGFACE_BASE_URL", "https://router.huggingface.co/v1"),
-        "temperature": float(os.getenv("HUGGINGFACE_TEMPERATURE", "0.7")),
-        "max_tokens": int(os.getenv("HUGGINGFACE_MAX_TOKENS", "2048")),
-        "type": os.getenv("HUGGINGFACE_TYPE", "api"), # api or local
-    }
-
-
 def get_vanna_config() -> Dict[str, Any]:
     return {
         "model": os.getenv("OLLAMA_MODEL"),

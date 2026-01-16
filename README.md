@@ -72,6 +72,73 @@ uv run streamlit run src/main.py
 ```
 If you see `ModuleNotFoundError` for any package, ensure you ran `pip install -r requirements.txt` (or `uv pip install -r requirements.txt`) in the same environment used by `python3` above.
 
+---
+
+## 🐳 Docker Deployment
+
+### Quick Start
+```bash
+# 1. Ensure your .env file is configured
+cp .env.example .env
+# Edit .env with your database and API credentials
+
+# 2. Build and start the container
+docker-compose up -d --build
+
+# 3. View logs
+docker-compose logs -f
+
+# 4. Access the app
+#    Frontend: http://localhost:8501
+#    API:      http://localhost:8001
+```
+
+### Development Mode
+The `src/` directory is mounted as a volume, so code changes reflect without rebuilding:
+```bash
+# Edit any file in src/
+# Then restart to apply Python changes:
+docker-compose restart
+
+# No rebuild needed for:
+# - Python code changes
+# - Prompt modifications (src/services/test2sql_prompt.md)
+# - Config changes
+
+# Rebuild required for:
+# - requirements.txt changes
+# - Dockerfile changes
+docker-compose up -d --build
+```
+
+### Useful Commands
+```bash
+# Stop the container
+docker-compose down
+
+# View real-time logs
+docker-compose logs -f
+
+# Restart after code changes
+docker-compose restart
+
+# Rebuild from scratch
+docker-compose build --no-cache
+docker-compose up -d
+
+# Shell access
+docker exec -it traderbot bash
+
+# Health check
+curl http://localhost:8001/health
+```
+
+### Network Configuration
+The container uses `network_mode: host` to access external services (like QWEN LLM at `192.168.71.72:8080`). Ensure:
+- The LLM server is running and accessible
+- Database is reachable from the host network
+- Ports 8001 and 8501 are available on the host
+
 ## Old vs New
 - Old UI entry: `TraderBotOptimized.py`
 - New UI entry: `src/main.py` (uses services in `src/services/*`)

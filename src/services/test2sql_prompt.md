@@ -170,6 +170,11 @@ WHERE datetime = (SELECT MAX(datetime) FROM ai_trading.table_name [WHERE is_acti
 - Only use simple single-column responses for direct value lookups (e.g., "What is my balance?")
 - Generate informative queries that provide comprehensive insights into the user's request
 
+- **Presenting Results:** Make sure to include the portfolio name and the default index in the results
+- **🚨 NEVER USE COUNT() FOR PORTFOLIO QUESTIONS:** When user asks "How many portfolios..." or "Which portfolios...", DO NOT return just a count. Instead, return the actual portfolio names with their relevant metrics. The explanation layer will count the rows if needed.
+  - ❌ WRONG: `SELECT COUNT(DISTINCT portfolio_name) FROM ...`
+  - ✅ CORRECT: `SELECT portfolio_name, ytd_return, ytd_index_return, default_index FROM ... WHERE ytd_return > ytd_index_return`
+- Symbol should be in uppercase and if mentioned in the query, make sure to include it in the results
 ---
 
 ### **5. Follow-Up Question Reasoning Strategy**
