@@ -17,8 +17,7 @@ import pandas as pd
 
 # Import models
 from src.api.models import (
-    QueryRequest, QueryResponse, ClassifyRequest, ClassifyResponse,
-    InitializeResponse, HealthResponse, SchemaResponse,
+    QueryRequest, InitializeResponse, HealthResponse, SchemaResponse,
     ExportRequest, ExportResponse, ChatMessage, StatsResponse
 )
 
@@ -215,220 +214,23 @@ async def initialize():
         )
 
 
-@app.post("/query/classify", response_model=ClassifyResponse)
-async def classify_query(request: ClassifyRequest):
-    """Classify a query into its type"""
-    if not app_state.initialized:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Service not initialized. Call /initialize first."
-        )
-    
-    try:
-        chat_history = convert_chat_history(request.chat_history) if request.chat_history else []
-        query_type = app_state.router.classify_query(request.query, chat_history)
-        return ClassifyResponse(query_type=query_type)
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error classifying query: {str(e)}"
-        )
+# /query/classify endpoint removed - classification is done internally by /query/stream
 
 
 # ============================================================================
-# Streaming Endpoints
+# Streaming Endpoints (Legacy endpoints removed - use /query/stream)
 # ============================================================================
 
-@app.post("/query/database/stream")
-async def process_database_query_streaming(request: QueryRequest):
-    """Process a database query with streaming explanation from QWEN"""
-    if not app_state.initialized:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Service not initialized. Call /initialize first."
-        )
-
-    async def generate_stream():
-        try:
-            chat_history = convert_chat_history(request.chat_history)
-
-            # Step 1: Send status - generating SQL
-            yield f"data: {json.dumps({'type': 'status', 'content': '🔍 Generating SQL query...'})}\n\n"
-            await asyncio.sleep(0)  # Allow event loop to send
-
-            # Generate SQL query
-            sql_query = app_state.db_handler.generate_sql(
-                request.query, chat_history
-            )
-
-            if sql_query.startswith("ERROR"):
-                yield f"data: {json.dumps({'type': 'error', 'content': sql_query})}\n\n"
-                return
-
-            # Step 2: Send SQL query to client
-            yield f"data: {json.dumps({'type': 'sql', 'content': sql_query})}\n\n"
-            await asyncio.sleep(0)
-
-            # Step 3: Execute query
-            yield f"data: {json.dumps({'type': 'status', 'content': '▶️ Executing query...'})}\n\n"
-            await asyncio.sleep(0)
-
-            success, results_df, message = app_state.sql_executor.execute_query(sql_query)
-
-            if not success:
-                yield f"data: {json.dumps({'type': 'error', 'content': f'Query execution failed: {message}'})}\n\n"
-                return
-
-            # Step 4: Send results to client
-            results_data = dataframe_to_list(results_df)
-            yield f"data: {json.dumps({'type': 'results', 'content': results_data, 'message': message})}\n\n"
-            await asyncio.sleep(0)
-
-            # Step 5: Stream explanation from QWEN
-            yield f"data: {json.dumps({'type': 'status', 'content': '✨ Generating explanation...'})}\n\n"
-            await asyncio.sleep(0)
-
-            # Stream the explanation chunks
-            # Stream the explanation chunks
-            # Note: stream_explain_results yields plain strings, so we wrap them
-            for chunk in app_state.db_handler.stream_explain_results(
-                request.query, results_df, sql_query
-            ):
-                yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
-                await asyncio.sleep(0)  # Force flush
-
-            app_state.query_stats["database"] += 1
-
-            # Signal completion
-            yield f"data: {json.dumps({'type': 'done'})}\n\n"
-
-        except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'content': f'Error processing query: {str(e)}'})}\n\n"
-
-    return StreamingResponse(
-        generate_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # Disable nginx buffering
-        }
-    )
-
-
-@app.post("/query/internet/stream")
-async def process_internet_query_streaming(request: QueryRequest):
-    """Process an internet data query with streaming explanation from QWEN"""
-    if not app_state.initialized:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Service not initialized. Call /initialize first."
-        )
-
-    async def generate_stream():
-        try:
-            chat_history = convert_chat_history(request.chat_history)
-
-            # Step 1: Fetch raw data
-            yield f"data: {json.dumps({'type': 'status', 'content': '🌐 Fetching financial data...'})}\n\n"
-            await asyncio.sleep(0)
-
-            # Fetch raw data (non-streaming part)
-            raw_response = app_state.internet_data_handler.fetch_raw_data(
-                request.query, chat_history
-            )
-
-            if raw_response.startswith("Error"):
-                yield f"data: {json.dumps({'type': 'error', 'content': raw_response})}\n\n"
-                return
-
-            # Step 2: Send raw data to client
-            yield f"data: {json.dumps({'type': 'raw_data', 'content': raw_response})}\n\n"
-            await asyncio.sleep(0)
-
-            # Step 3: Stream explanation from QWEN
-            yield f"data: {json.dumps({'type': 'status', 'content': '✨ Generating explanation...'})}\n\n"
-            await asyncio.sleep(0)
-
-            # Stream the explanation chunks
-            for chunk_data in app_state.internet_data_handler.explain_internet_data_streaming(
-                request.query, raw_response
-            ):
-                chunk_type = chunk_data.get("type")
-                
-                if chunk_type == "chunk":
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk_data.get('content', '')})}\n\n"
-                    await asyncio.sleep(0)
-                    
-                elif chunk_type == "metadata":
-                    yield f"data: {json.dumps({'type': 'metadata', 'elapsed_time': chunk_data.get('elapsed_time', 0)})}\n\n"
-                    
-                elif chunk_type == "error":
-                    yield f"data: {json.dumps({'type': 'error', 'content': chunk_data.get('content', 'Unknown error')})}\n\n"
-
-            app_state.query_stats["internet_data"] += 1
-
-            # Signal completion
-            yield f"data: {json.dumps({'type': 'done'})}\n\n"
-
-        except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'content': f'Error: {str(e)}'})}\n\n"
-
-    return StreamingResponse(
-        generate_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        }
-    )
+# /query/database/stream endpoint removed - use /query/stream instead
+# /query/internet/stream endpoint removed - use /query/stream instead
 
 
 # ============================================================================
-# Non-Streaming Endpoints (for greeting and comparison)
+# Non-Streaming Endpoints
 # ============================================================================
 
-@app.post("/query/greeting", response_model=QueryResponse)
-async def process_greeting(request: QueryRequest):
-    """Process a greeting or chitchat using UnifiedResponseGenerator"""
-    if not app_state.initialized:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Service not initialized. Call /initialize first."
-        )
-    
-    try:
-        chat_history = convert_chat_history(request.chat_history)
-        
-        # Use UnifiedResponseGenerator for greeting responses
-        generator = get_response_generator()
-        response = generator.generate_response(
-            query=request.query,
-            context_type="greeting",
-            chat_history=chat_history
-        )
-        
-        app_state.query_stats["greeting"] += 1
-        cleaned_response = clean_response_content(response)
-        
-        return QueryResponse(
-            success=True,
-            content=cleaned_response,
-            query_type="greeting"
-        )
-        
-    except Exception as e:
-        return QueryResponse(
-            success=False,
-            content=f"Error: {str(e)}",
-            query_type="greeting",
-            error=str(e)
-        )
-
-
-# /query/comparison endpoint removed - comparison queries now use /query/stream
-# which routes through QueryPlanner + TaskExecutor for unified handling
+# /query/greeting endpoint removed - use /query/stream instead
+# /query/comparison endpoint removed - use /query/stream instead
 
 
 @app.get("/schema", response_model=SchemaResponse)

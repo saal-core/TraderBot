@@ -102,7 +102,6 @@ st.markdown("""
 
 # API endpoint configuration
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8001")
-ENABLE_STREAMING = os.getenv("ENABLE_STREAMING", "true").lower() == "true"
 
 # Initialize session state
 if "messages" not in st.session_state:
@@ -289,59 +288,7 @@ def process_streaming_query(question: str):
         return None
 
 
-def process_non_streaming_query(question: str):
-    """Process a query without streaming (fallback)."""
-    headers = {"Content-Type": "application/json"}
-    chat_history = convert_messages_to_chat_history()
-    
-    try:
-        # First classify the query
-        classify_response = requests.post(
-            f"{API_BASE_URL}/query/classify",
-            json={"query": question},
-            headers=headers,
-            timeout=30
-        )
-        
-        if classify_response.status_code != 200:
-            st.error(f"Classification error: {classify_response.text}")
-            return None
-        
-        query_type = classify_response.json().get("query_type", "database")
-        
-        # Route to appropriate endpoint
-        endpoint_map = {
-            "database": "/query/database",
-            "greeting": "/query/greeting",
-            "internet_data": "/query/internet",
-            "hybrid": "/query/stream"  # hybrid goes through unified stream
-        }
-        
-        endpoint = endpoint_map.get(query_type, "/query/database")
-        
-        with st.spinner(f"Processing {query_type} query..."):
-            response = requests.post(
-                f"{API_BASE_URL}{endpoint}",
-                json={"query": question, "chat_history": chat_history},
-                headers=headers,
-                timeout=120
-            )
-        
-        if response.status_code == 200:
-            data = response.json()
-            return {
-                "final_answer": data.get("content", "No answer available"),
-                "sql_query": data.get("sql_query"),
-                "results": data.get("results"),
-                "query_type": data.get("query_type")
-            }
-        else:
-            st.error(f"Error: {response.status_code} - {response.text}")
-            return None
-            
-    except requests.exceptions.RequestException as e:
-        st.error(f"Failed to connect to the API: {str(e)}")
-        return None
+# process_non_streaming_query removed - all queries now use streaming via /query/stream
 
 
 # Title and description
@@ -392,9 +339,6 @@ with st.sidebar:
         st.success("🟢 API Connected")
     else:
         st.warning("🟡 API Not Initialized")
-    
-    # Streaming toggle
-    streaming_enabled = st.toggle("Enable Streaming", value=ENABLE_STREAMING)
     
     st.divider()
     
@@ -457,10 +401,7 @@ if question := st.chat_input("Ask a question about your portfolio or financial d
         
         # Process query and display assistant response
         with st.chat_message("assistant"):
-            if streaming_enabled:
-                result = process_streaming_query(question)
-            else:
-                result = process_non_streaming_query(question)
+            result = process_streaming_query(question)
             
             if result:
                 # Store the response with metadata
@@ -472,23 +413,6 @@ if question := st.chat_input("Ask a question about your portfolio or financial d
                     "query_type": result.get("query_type")
                 }
                 st.session_state.messages.append(assistant_message)
-                
-                # Elements are already displayed during streaming
-                # Only display if non-streaming mode was used
-                if not streaming_enabled:
-                    # 1. Show Router Classification FIRST
-                    if result.get("query_type"):
-                        st.info(f"🔍 **Router Classification:** {result['query_type']}")
-                    
-                    # 2. Show SQL Query in foldable expander
-                    if result.get("sql_query"):
-                        with st.expander("📝 Generated SQL Query", expanded=False):
-                            st.code(result["sql_query"], language="sql")
-                    
-                    # 3. Show Results Table in foldable expander
-                    if result.get("results"):
-                        with st.expander("📋 Results Table", expanded=False):
-                            st.dataframe(result["results"])
                 
                 # Trigger a stats update now that the query is finished
                 update_stats_display(stats_placeholder)
