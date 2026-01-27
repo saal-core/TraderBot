@@ -86,7 +86,39 @@ app_state = AppState()
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown"""
     print("🚀 TraderBot API starting up...")
+    
+    # Auto-initialize all services on startup
+    try:
+        print("🔧 Initializing services...")
+        app_state.sql_executor = PostgreSQLExecutor()
+        success, message = app_state.sql_executor.test_connection()
+        if not success:
+            print(f"❌ Database connection failed: {message}")
+        else:
+            print(f"✅ Database connected: {message}")
+        
+        app_state.router = LLMQueryRouter()
+        app_state.db_handler = DatabaseQueryHandler(sql_executor=app_state.sql_executor)
+        app_state.internet_data_handler = InternetDataHandler()
+        app_state.chat_memory = ChatMemory(max_pairs=5)
+        app_state.context_manager = ContextAwareManager()
+        
+        app_state.planner = QueryPlanner()
+        app_state.task_executor = TaskExecutor(
+            db_handler=app_state.db_handler,
+            internet_handler=app_state.internet_data_handler
+        )
+        
+        app_state.initialized = True
+        app_state.reset_stats()
+        print("✅ All services initialized successfully!")
+        
+    except Exception as e:
+        print(f"❌ Error during auto-initialization: {str(e)}")
+        app_state.initialized = False
+    
     yield
+    
     print("👋 TraderBot API shutting down...")
     if app_state.sql_executor:
         app_state.sql_executor.close()
@@ -176,62 +208,6 @@ async def health_check():
         timestamp=datetime.now().isoformat(),
         initialized=app_state.initialized
     )
-
-
-@app.post("/initialize", response_model=InitializeResponse)
-async def initialize():
-    """Initialize all handlers and database connection"""
-    try:
-        app_state.sql_executor = PostgreSQLExecutor()
-        success, message = app_state.sql_executor.test_connection()
-        if not success:
-            return InitializeResponse(success=False, message=message)
-        
-        app_state.router = LLMQueryRouter()
-        app_state.db_handler = DatabaseQueryHandler(sql_executor=app_state.sql_executor)
-        app_state.internet_data_handler = InternetDataHandler()
-        app_state.chat_memory = ChatMemory(max_pairs=5)
-        app_state.context_manager = ContextAwareManager()
-        
-        app_state.planner = QueryPlanner()
-        app_state.task_executor = TaskExecutor(
-            db_handler=app_state.db_handler,
-            internet_handler=app_state.internet_data_handler
-        )
-        
-        app_state.initialized = True
-        app_state.reset_stats()
-        
-        return InitializeResponse(
-            success=True,
-            message="All components initialized successfully!"
-        )
-        
-    except Exception as e:
-        return InitializeResponse(
-            success=False,
-            message=f"Error initializing components: {str(e)}"
-        )
-
-
-# /query/classify endpoint removed - classification is done internally by /query/stream
-
-
-# ============================================================================
-# Streaming Endpoints (Legacy endpoints removed - use /query/stream)
-# ============================================================================
-
-# /query/database/stream endpoint removed - use /query/stream instead
-# /query/internet/stream endpoint removed - use /query/stream instead
-
-
-# ============================================================================
-# Non-Streaming Endpoints
-# ============================================================================
-
-# /query/greeting endpoint removed - use /query/stream instead
-# /query/comparison endpoint removed - use /query/stream instead
-
 
 @app.get("/schema", response_model=SchemaResponse)
 async def get_schema():
@@ -425,6 +401,8 @@ async def _stream_internet_query(query: str, chat_history: List[Dict[str, str]])
         # Signal completion with full response
         yield generate_sse_event("assistant_message_complete", {
             "query_type": "internet_data",
+            "sql_query": "",      # Empty - no SQL for internet queries
+            "results": [],        # Empty - no tabular results
             "full_response": full_response
         })
 
@@ -479,6 +457,8 @@ async def _stream_query_generator(query: str, chat_history: List[Dict[str, str]]
             # Signal completion with full response
             yield generate_sse_event("assistant_message_complete", {
                 "query_type": "greeting",
+                "sql_query": "",      # Empty - no SQL for greetings
+                "results": [],        # Empty - no tabular results
                 "full_response": full_response
             })
         
@@ -577,9 +557,10 @@ async def query(request: QueryRequest):
                     # Use the accumulated full_response from the event if available
                     if data.get("full_response"):
                         full_response = data.get("full_response")
-                    if data.get("sql_query"):
+                    # Always capture sql_query and results (could be empty string/list)
+                    if "sql_query" in data:
                         sql_query = data.get("sql_query")
-                    if data.get("results"):
+                    if "results" in data:
                         results = data.get("results")
                 elif event_type == "error":
                     error = event_data.get("data", {}).get("error")
@@ -588,8 +569,8 @@ async def query(request: QueryRequest):
             "success": error is None,
             "query_type": query_type,
             "full_response": full_response,
-            "sql_query": sql_query,
-            "results": results,
+            "sql_query": sql_query if sql_query is not None else "",
+            "results": results if results is not None else [],
             "error": error
         }
         
@@ -598,8 +579,8 @@ async def query(request: QueryRequest):
             "success": False,
             "query_type": None,
             "full_response": "",
-            "sql_query": None,
-            "results": None,
+            "sql_query": "",
+            "results": [],
             "error": str(e)
         }
 

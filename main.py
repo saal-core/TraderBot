@@ -114,14 +114,15 @@ if "initialized" not in st.session_state:
 
 
 
-def initialize_api():
-    """Initialize the API connection."""
+
+def check_api_health():
+    """Check if the API is healthy and initialized."""
     try:
-        response = requests.post(f"{API_BASE_URL}/initialize", timeout=30)
+        response = requests.get(f"{API_BASE_URL}/health", timeout=5)
         if response.status_code == 200:
             data = response.json()
-            return data.get("success", False), data.get("message", "Unknown error")
-        return False, f"HTTP {response.status_code}: {response.text}"
+            return data.get("initialized", False), data.get("status", "unknown")
+        return False, f"HTTP {response.status_code}"
     except requests.exceptions.RequestException as e:
         return False, f"Connection error: {str(e)}"
 
@@ -324,21 +325,11 @@ def update_stats_display(placeholder):
 with st.sidebar:
     st.header("⚙️ Settings")
     
-    # Initialize button
-    if st.button("🔄 Initialize API", type="primary"):
-        with st.spinner("Initializing..."):
-            success, message = initialize_api()
-            if success:
-                st.session_state.initialized = True
-                st.success("✅ " + message)
-            else:
-                st.error("❌ " + message)
-    
-    # Status indicator
+    # Status indicator - check API health
     if st.session_state.initialized:
         st.success("🟢 API Connected")
     else:
-        st.warning("🟡 API Not Initialized")
+        st.warning("🟡 Connecting to API...")
     
     st.divider()
     
@@ -377,20 +368,20 @@ for message in st.session_state.messages:
                 with st.expander("📋 Results Table", expanded=False):
                     st.dataframe(message["results"])
 
-# Auto-initialize on first load
+# Check API health on first load
 if not st.session_state.initialized:
     with st.spinner("Connecting to API..."):
-        success, message = initialize_api()
-        if success:
+        initialized, status = check_api_health()
+        if initialized:
             st.session_state.initialized = True
             st.toast("✅ API Connected!")
         else:
-            st.warning(f"⚠️ Could not auto-initialize: {message}. Click 'Initialize API' in the sidebar.")
+            st.warning(f"⚠️ API not ready: {status}. Please wait for services to start.")
 
 # Chat input
 if question := st.chat_input("Ask a question about your portfolio or financial data..."):
     if not st.session_state.initialized:
-        st.warning("Please initialize the API first using the button in the sidebar.")
+        st.warning("Please wait for the API to initialize.")
     else:
         # Add user message
         st.session_state.messages.append({"role": "user", "content": question})

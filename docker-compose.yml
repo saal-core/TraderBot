@@ -18,6 +18,8 @@ services:
     volumes:
       # Mount entire src for development (changes reflect without rebuild)
       - ./src:/app/src
+      # Mount api.py for development (changes reflect without rebuild)
+      - ./api.py:/app/api.py
       # Mount .env file
       - ./.env:/app/.env:ro
       # Persist logs

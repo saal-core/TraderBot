@@ -186,9 +186,10 @@ class TaskExecutor:
         # Since we didn't track SQL/Results explicitly in a list to send, we might miss them in the UI for now.
         # But fixing the format is step 1.
         yield self._format_event("assistant_message_complete", {
-            "query_type": "hybrid", # inferred
-            "sql_query": final_sql,
-            "results": final_results
+            "query_type": "hybrid",
+            "sql_query": final_sql or "",      # Empty string if no SQL
+            "results": final_results or [],    # Empty list if no results
+            "full_response": ""                # Hybrid responses streamed via content events
         })
         
         yield self._format_event("stream_end", {})
