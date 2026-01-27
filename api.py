@@ -345,6 +345,7 @@ def generate_sse_event(event_type: str, data: Any) -> str:
 
 async def _stream_database_query(query: str, chat_history: List[Dict[str, str]]):
     """Internal generator for database queries"""
+    full_response = ""  # Accumulate full response
     try:
         # Step 1: Generate SQL
         yield generate_sse_event("status", {"message": "🔍 Generating SQL query..."})
@@ -374,16 +375,18 @@ async def _stream_database_query(query: str, chat_history: List[Dict[str, str]])
         # Explain results using stream
         # Note: stream_explain_results yields plain strings, so we wrap them
         for chunk in app_state.db_handler.stream_explain_results(query, results_df, sql_query):
+            full_response += chunk  # Accumulate chunks
             yield generate_sse_event("content", chunk)
             await asyncio.sleep(0)  # Force flush for real-time streaming
                 
         app_state.query_stats["database"] += 1
 
-        # Signal completion with SQL and Results for UI to display
+        # Signal completion with SQL, Results, and full response for UI to display
         yield generate_sse_event("assistant_message_complete", {
             "query_type": "database",
             "sql_query": sql_query,
-            "results": results_data
+            "results": results_data,
+            "full_response": full_response
         })
 
     except Exception as e:
@@ -392,6 +395,7 @@ async def _stream_database_query(query: str, chat_history: List[Dict[str, str]])
 
 async def _stream_internet_query(query: str, chat_history: List[Dict[str, str]]):
     """Internal generator for internet data queries"""
+    full_response = ""  # Accumulate full response
     try:
         # Step 1: Fetch Data
         yield generate_sse_event("status", {"message": "🌐 Fetching financial data..."})
@@ -409,12 +413,20 @@ async def _stream_internet_query(query: str, chat_history: List[Dict[str, str]])
         for chunk_data in app_state.internet_data_handler.explain_internet_data_streaming(query, raw_response):
             chunk_type = chunk_data.get("type")
             if chunk_type == "chunk":
-                yield generate_sse_event("content", chunk_data.get("content", ""))
+                chunk_content = chunk_data.get("content", "")
+                full_response += chunk_content  # Accumulate chunks
+                yield generate_sse_event("content", chunk_content)
                 await asyncio.sleep(0)  # Force flush for real-time streaming
             elif chunk_type == "error":
                 yield generate_sse_event("error", {"error": chunk_data.get("content", "Unknown error")})
 
         app_state.query_stats["internet_data"] += 1
+        
+        # Signal completion with full response
+        yield generate_sse_event("assistant_message_complete", {
+            "query_type": "internet_data",
+            "full_response": full_response
+        })
 
     except Exception as e:
         yield generate_sse_event("error", {"error": f"Error processing internet query: {str(e)}"})
@@ -453,14 +465,22 @@ async def _stream_query_generator(query: str, chat_history: List[Dict[str, str]]
         
         if query_type == "greeting":
             # Use UnifiedResponseGenerator for streaming greeting responses
+            full_response = ""  # Accumulate full response
             generator = get_response_generator()
             for chunk in generator.stream_response(
                 query=query,
                 context_type="greeting",
                 chat_history=chat_history
             ):
+                full_response += chunk  # Accumulate chunks
                 yield generate_sse_event("content", chunk)
                 await asyncio.sleep(0)  # Force flush for real-time streaming
+            
+            # Signal completion with full response
+            yield generate_sse_event("assistant_message_complete", {
+                "query_type": "greeting",
+                "full_response": full_response
+            })
         
         elif query_type == "database":
             async for event in _stream_database_query(query, chat_history):
@@ -505,6 +525,83 @@ async def stream_query(request: QueryRequest):
             "X-Accel-Buffering": "no"
         }
     )
+
+
+@app.post("/query")
+async def query(request: QueryRequest):
+    """
+    Non-streaming query endpoint.
+    
+    Processes the query and returns the complete response in a single JSON object.
+    Simpler to integrate than SSE streaming - recommended for backend-to-backend calls.
+    
+    Returns:
+        - query_type: Type of query (database, greeting, internet_data, hybrid)
+        - full_response: Complete LLM response text
+        - sql_query: Generated SQL (for database queries)
+        - results: Query results as list of dicts (for database queries)
+        - success: Whether the query was processed successfully
+        - error: Error message if failed
+    """
+    if not app_state.initialized:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Service not initialized. Call /initialize first."
+        )
+    
+    chat_history = convert_chat_history(request.chat_history)
+    
+    # Collect all events from the streaming generator
+    full_response = ""
+    sql_query = None
+    results = None
+    query_type = None
+    error = None
+    
+    try:
+        async for event in _stream_query_generator(request.query, chat_history):
+            # Parse the SSE event
+            if event.startswith("data:"):
+                event_data = json.loads(event[5:].strip())
+                event_type = event_data.get("type")
+                
+                if event_type == "content":
+                    full_response += event_data.get("content", "")
+                elif event_type == "sql":
+                    sql_query = event_data.get("data", {}).get("content")
+                elif event_type == "results":
+                    results = event_data.get("data", {}).get("content")
+                elif event_type == "assistant_message_complete":
+                    data = event_data.get("data", {})
+                    query_type = data.get("query_type")
+                    # Use the accumulated full_response from the event if available
+                    if data.get("full_response"):
+                        full_response = data.get("full_response")
+                    if data.get("sql_query"):
+                        sql_query = data.get("sql_query")
+                    if data.get("results"):
+                        results = data.get("results")
+                elif event_type == "error":
+                    error = event_data.get("data", {}).get("error")
+        
+        return {
+            "success": error is None,
+            "query_type": query_type,
+            "full_response": full_response,
+            "sql_query": sql_query,
+            "results": results,
+            "error": error
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "query_type": None,
+            "full_response": "",
+            "sql_query": None,
+            "results": None,
+            "error": str(e)
+        }
 
 # ============================================================================
 # Main entry point
