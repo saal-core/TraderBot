@@ -43,7 +43,7 @@ load_dotenv()
 
 
 # ============================================================================
-# Global State (initialized on startup or via /initialize endpoint)
+# Global State (auto-initialized on startup via lifespan)
 # ============================================================================
 
 class AppState:
@@ -215,7 +215,7 @@ async def get_schema():
     if not app_state.initialized:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Service not initialized. Call /initialize first."
+            detail="Service not initialized. Please wait for startup to complete."
         )
     
     try:
@@ -420,7 +420,7 @@ async def _stream_query_generator(query: str, chat_history: List[Dict[str, str]]
     """Internal generator to handle the async stream logic cleanly"""
     try:
         if not app_state.initialized:
-            yield generate_sse_event("error", {"error": "Service not initialized. Call /initialize first."})
+            yield generate_sse_event("error", {"error": "Service not initialized. Please wait for startup to complete."})
             yield generate_sse_event("stream_end", {})
             return
 
@@ -526,7 +526,7 @@ async def query(request: QueryRequest):
     if not app_state.initialized:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Service not initialized. Call /initialize first."
+            detail="Service not initialized. Please wait for startup to complete."
         )
     
     chat_history = convert_chat_history(request.chat_history)
